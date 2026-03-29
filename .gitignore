@@ -41,11 +41,10 @@ data/recordings/
 *.mat
 
 # Generated results & large artifacts
-results/trace.nc
-results/plasma_interpolated.csv
+# results/trace.nc
+# results/plasma_interpolated.csv
 
 # PDFs (reference papers — large binary files)
-*.pdf
 
 # Claude Code tool directory (local dev tool, not project code)
 .claude/
