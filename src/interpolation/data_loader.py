@@ -40,6 +40,7 @@ def load_data(csv_path: str | Path = "data/plasma_clean.csv") -> dict:
     dmt["subj_idx"] = dmt["subject"].map(subj_to_idx)
 
     t_obs_flat = dmt["time_min"].values.astype(float)
+    print(len(t_obs_flat))
     P_obs_flat = dmt["plasma_conc"].values.astype(float)
     subj_idx_flat = dmt["subj_idx"].values.astype(int)
     is_imputed_flat = dmt["is_imputed"].values.astype(bool)

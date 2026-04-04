@@ -217,11 +217,10 @@ class EdgeAwareMultiheadAttention(torch.nn.Module):
     is added to the raw attention score between nodes i and j for head h.
     This is how the Graphormer "sees" the graph topology inside attention.
 
-    Parameters
     ----------
     embed_dim  : total embedding dimension (must be divisible by num_heads)
     num_heads  : number of attention heads
-    dropout    : attention weight dropout probability
+    dropout    : atteexplanation_graphTrip_paper.mdntion weight dropout probability
     """
 
     def __init__(self, embed_dim: int,
@@ -335,7 +334,7 @@ class NodeEmbeddingGraphormer(torch.nn.Module):
     Parameters
     ----------
     num_node_attr  : number of learned node features (3 for REACT)
-    num_cond_attrs : number of conditional node features (3 for MNI coords)
+    num_cond_attrs : number of conditional node features (3 for MNI coords) - this are called conditional because they are feed into the encoder but the decoder does not need to reconstruct them
     num_edge_attr  : number of edge features (1 for FC correlation)
     hidden_dim     : internal transformer dimension (must be divisible by num_heads)
     node_emb_dim   : output embedding dimension per node
@@ -348,8 +347,8 @@ class NodeEmbeddingGraphormer(torch.nn.Module):
                  num_node_attr: int,
                  num_cond_attrs: int,
                  num_edge_attr: int,
-                 hidden_dim: int,   # usually higher than input_dim
-                 node_emb_dim: int,
+                 hidden_dim: int,   # usually higher than input_dim (this is the internal dimension of the transformer)
+                 node_emb_dim: int,  # final output dimension that gets pass to the variational encoder
                  max_spd_dist: int = 10,
                  num_layers: int = 3,
                  num_heads: int = 4,
@@ -370,13 +369,14 @@ class NodeEmbeddingGraphormer(torch.nn.Module):
         self.max_spd_dist = max_spd_dist
 
         # Embeddings
-        self.input_proj = torch.nn.Linear(self.input_dim, hidden_dim)
+        self.input_proj = torch.nn.Linear(self.input_dim, hidden_dim)  # [N, 6] → [N, hidden_dim]
         self.edge_encoder = torch.nn.Sequential(
             torch.nn.Linear(num_edge_attr, hidden_dim),
             torch.nn.ReLU(),
             torch.nn.Linear(hidden_dim, num_heads)
         )
-        self.dist_encoder = torch.nn.Embedding(max_spd_dist + 2, num_heads)  # +1 for padding/inf
+        # each attention head gets its own distance
+        self.dist_encoder = torch.nn.Embedding(max_spd_dist + 2, num_heads)  # +2 for padding nodes/inf
 
         # Transformer layers
         self.layers = torch.nn.ModuleList([
@@ -386,20 +386,30 @@ class NodeEmbeddingGraphormer(torch.nn.Module):
 
         self.output_proj = torch.nn.Linear(hidden_dim, node_emb_dim)
 
+    # Notes Ale: PyG stores all graphs concatenated with global node indices
+    # Notes Ale: how does batch look like
+    # batch.x          [N_total, 3]      REACT values for all nodes in all graphs
+    # batch.xc         [N_total, 3]      MNI coordinates for all nodes
+    # batch.edge_index [2, E_total]      edge connections for all graphs (stores edges in both directions)
+    # batch.edge_attr  [E_total, 1]      FC correlation for all edges
+    # batch.spd        [N_total, N]      shortest path distances
+    # batch.batch      [N_total]         which graph each node belongs to
+    #                                 e.g. [0,0,0,...,1,1,1,...,2,2,2,...]
+
     def forward(self, batch):
         x, edge_index = batch.x, batch.edge_index
         edge_attr = getattr(batch, 'edge_attr', None)
         x = torch.cat([x, batch.xc], dim=1)  # add conditional attributes
-        x = self.input_proj(x)
+        x = self.input_proj(x)  # [N, hidden_dim], ex: [320, hidden_dim]
 
         # Dense batching
-        x_dense, x_mask = to_dense_batch(x, batch.batch)  # [B, N, D]
+        x_dense, x_mask = to_dense_batch(x, batch.batch)  # [B, N_graph, hidden_dim], ex:  [4, 80, hidden_dim]
         B, N, D = x_dense.shape
 
         # SPD embeddings
         spd = getattr(batch, 'spd', None)
         assert spd is not None, "batch.spd must be provided for Graphormer"
-        spd_dense, spd_mask = get_batched_spd(batch, self.max_spd_dist)  # [B, N_max, N_max]
+        spd_dense, spd_mask = get_batched_spd(batch, self.max_spd_dist)  # [B, N_max, N_max] # ex [4,80,80]
         spd_dense = spd_dense.clamp(max=self.dist_encoder.num_embeddings - 1)
         spd_bias = self.dist_encoder(spd_dense.long())  # [B, N_max, N_max, num_heads]
         spd_bias = spd_bias.permute(0, 3, 1, 2)         # [B, num_heads, N_max, N_max]
@@ -411,22 +421,23 @@ class NodeEmbeddingGraphormer(torch.nn.Module):
             mask = x_mask
 
         # Edge feature bias
-        edge_bias = torch.zeros_like(spd_bias)
+        edge_bias = torch.zeros_like(spd_bias)  # [B, num_heads, N_max, N_max]
         if edge_attr is not None:
             edge_bias_values = self.edge_encoder(edge_attr)  # [E, num_heads]
 
             # Convert global edge_index to per-graph local indices
             # Compute per-graph node ranges so we can map to [0..N_g-1]
-            node_counts = torch.bincount(batch.batch)
+            node_counts = torch.bincount(batch.batch)  # ex: [80,80,80,80]
             starts = torch.cumsum(torch.cat([torch.tensor([0], device=node_counts.device),
-                                             node_counts[:-1]]), dim=0)  # [B]
+                                             node_counts[:-1]]), dim=0)  # [B] , ex: [0, 80, 160, 240]
 
             for g in range(B):
-                g_mask = (batch.batch[edge_index[0]] == g)
-                e_idx = edge_index[:, g_mask]               # global indices
+                g_mask = (batch.batch[edge_index[0]] == g)  # g_mask selects edjes that belong to graph G
+                # global indices, # e.g. for graph 1: [[80, 81, 82,...], [81, 80, 83,...]]
+                e_idx = edge_index[:, g_mask]
                 start = starts[g]
-                e_idx_local = e_idx - start                 # map to [0..N_g-1]
-                e_attr = edge_bias_values[g_mask]           # [E_g, num_heads]
+                e_idx_local = e_idx - start  # map to [0..N_g-1], converts to local indices
+                e_attr = edge_bias_values[g_mask]  # [E_g, num_heads]
                 # scatter into the [B,num_heads,N,N] bias tensor
                 edge_bias[g, :, e_idx_local[0], e_idx_local[1]] = e_attr.T  # [num_heads, E_g]
 
@@ -438,6 +449,7 @@ class NodeEmbeddingGraphormer(torch.nn.Module):
             x_dense = layer(x_dense, mask, attn_bias)
 
         # Output projection
+        # ex x_dense[4,80,128] , mask [4,80] all true then x_out= [320,128]
         x_out = x_dense[mask]
         x_out = self.output_proj(x_out)
         return x_out
@@ -503,7 +515,7 @@ class GraphTransformerPooling(torch.nn.Module):
     dropout       : dropout probability
     reduce        : 'mean' or 'sum' pooling after attention
     """
-    HANDLES_CONTEXT = False
+    HANDLES_CONTEXT = False  # NOTES_ALE: clinical features are concatenated after pooling
 
     @classmethod
     def can_handle_context(cls):
@@ -720,6 +732,8 @@ class NodeLevelVGAE(torch.nn.Module):
     edge_decoder_cfg    : config for MLPEdgeDecoder   (tanh, optional)
     edge_idx_decoder_cfg: config for MLPEdgeDecoder   (sigmoid, optional)
     """
+    # NOTES_ALE NodeLevelVGAE owns the required params
+    # NOTES_ALE Node_features for the paper usa case are scalars
 
     def __init__(self, params: dict,
                  node_emb_model_cfg: dict,
@@ -762,8 +776,8 @@ class NodeLevelVGAE(torch.nn.Module):
         updated_params = self._get_module_params(pooling_cfg)
         updated_params['pooling_dim'] = self.params['latent_dim']
 
-        # Add num_context_attrs if pooling layer handles it
-        pooling_class = globals()[pooling_cfg['model_type']]
+        # Add num_context_attrs if pooling layer handles itx
+        pooling_class = globals()[pooling_cfg['model_type']]  # pooling_cfg['model_type'] = "GraphTransformerPooling"
         if pooling_class.can_handle_context():
             updated_params['num_context_attrs'] = self.params['num_context_attrs']
         elif self.params['num_context_attrs'] > 0:
@@ -795,7 +809,7 @@ class NodeLevelVGAE(torch.nn.Module):
                         self.edge_decoder,
                         self.edge_idx_decoder,
                         self.node_decoder]
-        self.readout_dim = self.pooling.output_dim
+        self.readout_dim = self.pooling.output_dim  # stores the output size of pooling layer
 
     def _get_module_params(self, submodule_cfg):
         '''
@@ -832,7 +846,7 @@ class NodeLevelVGAE(torch.nn.Module):
         ----------
         batch (Data): Batch of data objects from PyTorch Geometric.
         '''
-        # Save a copy of the original inputs for the decoder
+        # Save a copy of the original inputs for the decoder, triu_idx are the upper triangular edges
         x, edges, triu_idx = self._get_decoder_labels(batch)
 
         # Encode node features
@@ -850,7 +864,7 @@ class NodeLevelVGAE(torch.nn.Module):
         if self.edge_decoder is not None:
             rcn_edges = self.edge_decoder(z, triu_idx)     # [num_triu_edges, num_edge_attr]
 
-            # Decode edge indices
+            # Decode edge indices (decodes if an edge exitsts or not)
             if self.decode_edge_idx:
                 rcn_edge_idx = self.edge_idx_decoder(z, triu_idx)  # [num_triu_edges, 1] between 0 and 1
                 rcn_edges = rcn_edge_idx * rcn_edges

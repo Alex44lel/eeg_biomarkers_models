@@ -1,0 +1,2 @@
+A 94% HDI is the shortest interval that contains 94% of the probability mass of a posterior distribution
+Gelman-Rubin statistic R -> check if chains are exploring the same distribution

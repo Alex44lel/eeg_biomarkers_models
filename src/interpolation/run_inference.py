@@ -37,10 +37,10 @@ def main():
     print("Sampling (2 chains × 1000 draws + 1000 tune)...")
     with model:
         trace = pm.sample(
-            draws=1000,
-            tune=1000,
-            chains=2,
-            target_accept=0.9,
+            draws=2000,
+            tune=2000,
+            chains=4,
+            target_accept=0.95,
             return_inferencedata=True,
             progressbar=True,
         )
