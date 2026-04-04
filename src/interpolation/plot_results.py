@@ -1,8 +1,9 @@
 """
-Visualise posterior predictive plasma concentration curves and parameter posteriors.
+Visualise posterior predictive plasma and brain concentration curves, and parameter posteriors.
 
 Produces:
     results/figures/posterior_predictions.png
+    results/figures/brain_predictions.png
     results/figures/parameter_posteriors.png
     results/figures/hyperparameter_posteriors.png
 
@@ -18,12 +19,14 @@ import matplotlib.pyplot as plt
 import arviz as az
 
 
-# Colour palette
+# Colour palette — plasma (blue) and brain (green)
 _C = {
     "curve": "#1f77b4",
     "band": "#aec7e8",
     "obs": "#d62728",
     "imputed": "#ff7f0e",
+    "brain_curve": "#2ca02c",
+    "brain_band": "#98df8a",
 }
 
 
@@ -121,7 +124,78 @@ def plot_posterior_predictions(
 
 
 # ---------------------------------------------------------------------------
-# 2. Subject-level parameter posteriors (violin)
+# 2. Brain concentration posterior predictions per subject (Eq. 17)
+# ---------------------------------------------------------------------------
+
+def plot_brain_predictions(
+    interp_path: str | Path = "results/plasma_interpolated.csv",
+    csv_path: str | Path = "data/plasma_clean.csv",
+    out_path: str | Path = "results/figures/brain_predictions.png",
+):
+    """One subplot per subject: posterior mean + 94% HDI of B(t) (Eq. 17)."""
+    data = load_data(csv_path)
+    df_interp = pd.read_csv(interp_path)
+
+    n_subj = data["n_subjects"]
+    ncols = 4
+    nrows = (n_subj + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(14, 3.5 * nrows))
+    axes = axes.flatten()
+
+    for i, subj in enumerate(data["subject_ids"]):
+        ax = axes[i]
+        curve = df_interp[df_interp["subject"] == subj]
+        dose = data["dose_per_subject"][i]
+
+        # HDI shading
+        ax.fill_between(
+            curve["time_min"],
+            curve["brain_hdi_low"],
+            curve["brain_hdi_high"],
+            color=_C["brain_band"],
+            alpha=0.6,
+            label="94% HDI",
+        )
+        # Posterior mean
+        ax.plot(
+            curve["time_min"],
+            curve["brain_mean"],
+            color=_C["brain_curve"],
+            lw=2,
+            label="Posterior mean",
+        )
+
+        ax.set_title(f"{subj}  ({dose:.0f} mg)", fontsize=10)
+        ax.set_xlabel("Time (min)", fontsize=8)
+        ax.set_ylabel("B(t) (a.u.)", fontsize=8)
+        ax.set_xlim(left=0)
+        ax.set_ylim(bottom=0)
+        ax.tick_params(labelsize=7)
+
+    # Hide surplus axes
+    for j in range(i + 1, len(axes)):
+        axes[j].set_visible(False)
+
+    # Shared legend
+    seen = {}
+    for ax in axes[:n_subj]:
+        for h, l in zip(*ax.get_legend_handles_labels()):
+            if l not in seen:
+                seen[l] = h
+    fig.legend(seen.values(), seen.keys(), loc="lower right", fontsize=8,
+               ncol=2, bbox_to_anchor=(0.98, 0.02))
+
+    fig.suptitle("Two-compartment PK model — brain concentration B(t) (Eq. 17)", fontsize=13)
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
+
+    _ensure_dir(Path(out_path))
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved → {out_path}")
+
+
+# ---------------------------------------------------------------------------
+# 4. Subject-level parameter posteriors (violin)
 # ---------------------------------------------------------------------------
 
 def plot_parameter_posteriors(
@@ -178,7 +252,7 @@ def plot_parameter_posteriors(
 
 
 # ---------------------------------------------------------------------------
-# 3. Hyperparameter posteriors
+# 5. Hyperparameter posteriors
 # ---------------------------------------------------------------------------
 
 def plot_hyperparameters(
@@ -212,6 +286,9 @@ def plot_hyperparameters(
 def main():
     print("Plotting posterior predictions...")
     plot_posterior_predictions()
+
+    print("Plotting brain concentration predictions (Eq. 17)...")
+    plot_brain_predictions()
 
     print("Plotting parameter posteriors...")
     plot_parameter_posteriors()

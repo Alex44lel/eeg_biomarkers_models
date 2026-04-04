@@ -7,7 +7,7 @@ computes the mean + 94% HDI at 500 evenly-spaced time points.
 Usage:
     python -m src.interpolation.interpolation
 """
-from src.interpolation.pk_model import plasma_concentration_np
+from src.interpolation.pk_model import plasma_concentration_np, brain_concentration_np
 from src.interpolation.data_loader import load_data
 from pathlib import Path
 
@@ -34,7 +34,9 @@ def interpolate_plasma(
     Returns
     -------
     DataFrame with columns:
-        subject, time_min, plasma_mean, plasma_hdi_low, plasma_hdi_high
+        subject, time_min,
+        plasma_mean, plasma_hdi_low, plasma_hdi_high,
+        brain_mean,  brain_hdi_low,  brain_hdi_high
     """
     data = load_data(csv_path)
     trace = az.from_netcdf(str(trace_path))
@@ -68,13 +70,17 @@ def interpolate_plasma(
         k2 = k2_flat[:, i, np.newaxis]
         P0 = P0_flat[:, i, np.newaxis]
 
-        # P_mat shape: (n_samples, n_grid)
+        # P_mat / B_mat shape: (n_samples, n_grid)
         P_mat = plasma_concentration_np(t, P0, k0, k1, k2)
+        B_mat = brain_concentration_np(t, P0, k0, k1, k2)
 
         P_mean = P_mat.mean(axis=0)                        # (n_grid,)
-        hdi = az.hdi(P_mat, hdi_prob=hdi_prob)             # (n_grid, 2)
-        P_low = hdi[:, 0]
-        P_high = hdi[:, 1]
+        P_hdi = az.hdi(P_mat, hdi_prob=hdi_prob)           # (n_grid, 2)
+        P_low, P_high = P_hdi[:, 0], P_hdi[:, 1]
+
+        B_mean = B_mat.mean(axis=0)
+        B_hdi = az.hdi(B_mat, hdi_prob=hdi_prob)
+        B_low, B_high = B_hdi[:, 0], B_hdi[:, 1]
 
         for j in range(n_grid):
             records.append(
@@ -84,6 +90,9 @@ def interpolate_plasma(
                     "plasma_mean": P_mean[j],
                     "plasma_hdi_low": P_low[j],
                     "plasma_hdi_high": P_high[j],
+                    "brain_mean": B_mean[j],
+                    "brain_hdi_low": B_low[j],
+                    "brain_hdi_high": B_high[j],
                 }
             )
 

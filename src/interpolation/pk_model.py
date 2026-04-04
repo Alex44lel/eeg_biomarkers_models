@@ -45,7 +45,7 @@ def alpha_beta_np(k0, k1, k2):
 
 def plasma_concentration_np(t, P0, k0, k1, k2):
     """
-    P(t) — numpy version.
+    P(t) — numpy version (Eq. 16).
 
     Parameters
     ----------
@@ -59,6 +59,25 @@ def plasma_concentration_np(t, P0, k0, k1, k2):
         (k2 - alpha) * np.exp(-alpha * np.asarray(t))
         - (k2 - beta) * np.exp(-beta * np.asarray(t))
     )
+
+
+def brain_concentration_np(t, P0, k0, k1, k2):
+    """
+    B(t) — numpy version (Eq. 17).
+
+    Brain compartment concentration from the two-compartment IV bolus model:
+        B(t) = k1*P(0) / (beta - alpha) * [exp(-alpha*t) - exp(-beta*t)]
+
+    Parameters
+    ----------
+    t   : array-like, times in minutes
+    P0  : scalar or array, initial plasma concentration (ng/mL)
+    k0, k1, k2 : scalar or array rate constants (min^-1)
+    """
+    alpha, beta = alpha_beta_np(k0, k1, k2)
+    denom = beta - alpha
+    t = np.asarray(t)
+    return k1 * P0 / denom * (np.exp(-alpha * t) - np.exp(-beta * t))
 
 
 # ---------------------------------------------------------------------------
