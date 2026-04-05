@@ -33,13 +33,17 @@ def build_model(t, lzc, subject_idx, n_subjects):
 
         # Index into per-subject parameters
         k1_obs = k1[subj_idx]
+        k2_obs = k2[subj_idx]
         y_init_obs = y_init[subj_idx]
         alpha_obs = alpha[subj_idx]
         beta_obs = beta[subj_idx]
 
-        # Clamp time: before injection (t<0) there is no drug, so B(t)=0
         t_eff = t_data
 
+        # eq 16:
+        y1 = (y_init_obs / (beta_obs - alpha_obs)
+              * ((k2_obs - alpha_obs) * pt.exp(-alpha_obs * t_eff) - (k2_obs - beta_obs) * pt.exp(-beta_obs * t_eff)))
+        y1_det = pm.Deterministic("y1", y1)
         # Brain compartment analytical solution (eq. 17)
         # No baseline shift needed — data is already baseline-normalized
         y2 = (
@@ -88,19 +92,38 @@ def compute_posterior_predictive(trace, t_grid, subject_idx_grid, n_subjects):
     sqrt_disc = np.sqrt(disc)
     alpha = (s - sqrt_disc) / 2.0
     beta = (s + sqrt_disc) / 2.0
+    lz_sigma = trace.posterior["lz_sigma"].values.reshape(-1)
 
-    # Compute predictions: shape (n_samples, n_time_points)
-    subj = subject_idx_grid
+    subj = np.atleast_1d(subject_idx_grid)
     k1_g = k1[:, subj]
     y_init_g = y_init[:, subj]
     alpha_g = alpha[:, subj]
     beta_g = beta[:, subj]
 
-    t_g = t_grid[np.newaxis, :]
+    # Handle broadcasting (as discussed previously)
+    if len(subj) != len(t_grid):
+        alpha_g = alpha_g[:, :, np.newaxis]
+        beta_g = beta_g[:, :, np.newaxis]
+        k1_g = k1_g[:, :, np.newaxis]
+        y_init_g = y_init_g[:, :, np.newaxis]
+        t_g = t_grid[np.newaxis, np.newaxis, :]
+    else:
+        t_g = t_grid[np.newaxis, :]
 
-    predictions = (
+    # 1. Compute the Mean Curve (Narrow HDI)
+    mean_predictions = (
         k1_g * y_init_g / (beta_g - alpha_g)
         * (np.exp(-alpha_g * t_g) - np.exp(-beta_g * t_g))
     )
 
-    return predictions
+    # 2. Add Observation Noise to simulate actual data (Wide HDI)
+    # Expand lz_sigma dimensions to broadcast with mean_predictions
+    if len(subj) != len(t_grid):
+        lz_sigma_expanded = lz_sigma[:, np.newaxis, np.newaxis]
+    else:
+        lz_sigma_expanded = lz_sigma[:, np.newaxis]
+
+    # Draw random normal samples using the predicted mean and the sampled sigma
+    predictive_samples = np.random.normal(loc=mean_predictions, scale=lz_sigma_expanded)
+
+    return predictive_samples  # Plot the HDI of THIS to match the paper

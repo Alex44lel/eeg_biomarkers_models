@@ -28,7 +28,7 @@ def load_and_prepare(exclude_subjects=None):
         df = df[~df["subject"].isin(exclude_subjects)]
 
     # The paper plots lzc_normalized directly (percentage change from baseline).
-    df["lzc"] = df["lzc_normalized"]
+    df["lzc"] = (df["lzc_normalized"] + 5) / 10
 
     # Build integer subject index (use all data, not just post-injection)
     subject_names = sorted(df["subject"].unique())

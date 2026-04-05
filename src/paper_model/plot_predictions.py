@@ -26,7 +26,6 @@ def plot_predictions(trace, data, output_path, t_max=18.0, n_grid=200):
     predictions = compute_posterior_predictive(
         trace, t_grid, subject_idx_grid, n_subjects
     )
-
     # Layout: 4 rows x 3 cols
     n_cols = 3
     n_rows = 4
@@ -56,7 +55,7 @@ def plot_predictions(trace, data, output_path, t_max=18.0, n_grid=200):
         ax.fill_between(t_subj, hdi_low, hdi_high, color="grey", alpha=0.3, zorder=1)
         ax.set_title(subj_name)
         ax.set_xlim(0, t_max)
-        ax.set_ylim(-5, 20)
+        ax.set_ylim(0, 3.2)
 
     # Hide unused subplots
     for j in range(n_subjects, len(axes)):
