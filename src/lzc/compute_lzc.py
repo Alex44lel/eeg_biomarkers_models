@@ -98,7 +98,6 @@ def process_subject(mat_path):
 
     # --- Baseline (cells 0 + 1) ---
     # Cell 0: pre-injection baseline
-    # Cell 1: first post-injection minute (DMT not yet at peak effect)
     baseline_lzc = []
     for bl_cell_idx in range(1):
         for trial in cells[bl_cell_idx][()]["trial"]:
@@ -107,7 +106,7 @@ def process_subject(mat_path):
     baseline_lzc = np.array(baseline_lzc)
     baseline_mean = np.mean(baseline_lzc)
     n_baseline = len(cells[0][()]["trial"])  # sequential time offset = cell 0 only
-    print(f"  Baseline (cells 0+1): {len(baseline_lzc)} trials, mean LZc = {baseline_mean:.4f}")
+    print(f"  Baseline (cells 0): {len(baseline_lzc)} trials, mean LZc = {baseline_mean:.4f}")
 
     # --- All cells: sequential trial time ---
     all_lzc = []
@@ -141,7 +140,9 @@ def process_subject(mat_path):
 
     df = pd.DataFrame({
         "time_min": all_times,
+        "lzc_raw": all_lzc,
         "lzc_normalized": lzc_normalized,
+        "baseline_mean": baseline_mean,
     })
     df.attrs["injection_time_min"] = injection_time_min
     return df, injection_time_min

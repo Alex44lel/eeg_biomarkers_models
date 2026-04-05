@@ -14,3 +14,27 @@ y_init is p(0)
   Why the EEG is shorter than 20 min: The raw recording spans ~27.5 min of wall-clock time, but a lot of that is gaps — artifact-rejected
    segments, the injection gap (~5 min), and inter-trial gaps. Only the clean 3-second epochs survive in data_trials3s.mat. Those 342
   clean trials = 17.1 min of sequential time, even though the actual experiment lasted ~25 min post-baseline. 
+
+
+
+  -exclusion of both subject 3 (flat LZ experience) and subject 9 (missing data). From this
+point onwards, subject 11 will also be excluded from all the experiments outlined beyond
+this section
+
+
+The observed plasma data for Pi was intentionally excluded
+due to complications on several aspects: its difficulty of cross-subject normalization, data
+sparsity challenges and undesirable convergence experiences (see Appendix B for details).
+Therefore, the design of the Bayesian model graph for a pooled two compartment model is
+shown in figure 18. Given the Bayesian inference consider each parameter being probabilistic in nature, parameters k0, k1, k2 and y init are all random variables. y init represents
+P(0) which is the initial DMT concentration in plasma at time = 0. Each of the model
+parameter has a prior distribution defined in the graph node. For example, k0, k1, k2
+∼ HalfCauchy .
+Moreover, the variables y1 and y2 are derived through a deterministic computational
+process involving two intermediary variables, alpha and beta which in turn are contingent
+upon the rate parameters. Note that alpha and beta are merely middle layer variables which
+have no biological interpretations. Instead they are essential components of the analytical
+solution to the previous ODEs 13 (see section 5.2 for details).
+Last, the plasma concentrations, represented as variable plasma and LZc values, represented as variable lz, are modelled to follow normally distributed priors as plasma ∼
+N (y1, plasma sigma) lz ∼ N (y2, lz sigma). Finally, the model fitting process exclusively
+leverages variable lz as the observed variable, which is shown in the grey box

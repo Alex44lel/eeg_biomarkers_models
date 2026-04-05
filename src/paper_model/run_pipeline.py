@@ -1,0 +1,64 @@
+"""
+Two-compartment partial pooling PK model pipeline.
+
+Usage:
+    python -m src.paper_model.run_pipeline [--draws 1000] [--chains 2] [--load-trace path]
+"""
+
+import argparse
+from pathlib import Path
+
+import arviz as az
+
+from .prepare_data import load_and_prepare
+from .partial_pooling_model import build_model, fit_model
+from .plot_predictions import plot_predictions
+from .plot_parameters import plot_parameters
+
+RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "paper_model"
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Partial pooling two-compartment PK model")
+    parser.add_argument("--draws", type=int, default=1000, help="MCMC draws per chain")
+    parser.add_argument("--chains", type=int, default=2, help="Number of MCMC chains")
+    parser.add_argument("--load-trace", type=str, default=None, help="Path to existing trace .nc file")
+    args = parser.parse_args()
+
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Step 1: Prepare data
+    print("Loading and preparing data...")
+    data = load_and_prepare()
+    print(f"  {len(data['subject_names'])} subjects, {len(data['t_model'])} observations")
+
+    # Step 2: Build and fit model (or load existing trace)
+    if args.load_trace:
+        print(f"Loading trace from {args.load_trace}...")
+        trace = az.from_netcdf(args.load_trace)
+    else:
+        print(f"Building model and sampling ({args.draws} draws, {args.chains} chains)...")
+        model = build_model(
+            data["t_model"], data["lzc"], data["subject_idx"],
+            len(data["subject_names"]),
+        )
+        trace = fit_model(model, draws=args.draws, chains=args.chains)
+
+        # Save trace
+        trace_path = RESULTS_DIR / "partial_pooling_trace.nc"
+        trace.to_netcdf(str(trace_path))
+        print(f"  Trace saved to {trace_path}")
+
+    # Step 3: Plot predictions (Figure 26)
+    print("Generating predictions plot...")
+    plot_predictions(trace, data, RESULTS_DIR / "partial_pooling_predictions.png")
+
+    # Step 4: Plot parameters (Figure 27)
+    print("Generating parameters plot...")
+    plot_parameters(trace, data, RESULTS_DIR / "partial_pooling_parameters.png")
+
+    print("Done!")
+
+
+if __name__ == "__main__":
+    main()
