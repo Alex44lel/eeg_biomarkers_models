@@ -37,7 +37,7 @@ Thumbs.db
 desktop.ini
 
 # Large raw data files (not version-controlled; obtain separately)
-data/recordings/
+
 *.mat
 
 # Generated results & large artifacts

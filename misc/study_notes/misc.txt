@@ -3,3 +3,14 @@ Gelman-Rubin statistic R -> check if chains are exploring the same distribution
 
 
 y_init is p(0)
+
+
+ What we plot: All 4 cells — cell 0 (baseline) + cells 1-3 (post-injection). That's the full cleaned EEG, all 342 trials for S01.       
+                                                                                                                                         
+  Why the t=20min plasma point is missing: The last plasma sample for S01 is at 20 min post-injection. On our sequential time scale, that
+   maps to 20 + 4.25 = 24.25 min — but the EEG data only spans 17.1 min of sequential time (342 trials × 3s). So the last plasma dot     
+  falls off the right edge of the plot.                                                                                                  
+                                                                  
+  Why the EEG is shorter than 20 min: The raw recording spans ~27.5 min of wall-clock time, but a lot of that is gaps — artifact-rejected
+   segments, the injection gap (~5 min), and inter-trial gaps. Only the clean 3-second epochs survive in data_trials3s.mat. Those 342
+  clean trials = 17.1 min of sequential time, even though the actual experiment lasted ~25 min post-baseline. 

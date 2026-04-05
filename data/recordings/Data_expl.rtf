@@ -1,0 +1,29 @@
+{\rtf1\ansi\ansicpg1252\cocoartf1348\cocoasubrtf170
+{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww27400\viewh12800\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural
+
+\f0\fs24 \cf0 Each subject dir contains a DMT and PLA folder for each drug condition\
+Each one of these has one file:\
+\
+data_trials3s: clean data, with 4 cells containing data cut into 3 sec trials. The 1st cell is the 5 min baseline (preinfusion), the second cell corresponds to data from 30 sec postinfusion to 6 min postinfusion. The third cell from min 7 to 12 postinfusion and the fourth from min 13 to 18 postinfusion.\
+\
+Here you could compare the baseline from each condition (DMT or PLA) to the first 5 mins post infusion. The last 2 cells would not be crucial - these are also not present in S09BB for placebo as there were strong equipment artifacts.\
+\
+data_trialsmxm_3s.mat: clean data with 21 cells containing data cut into 3 sec trials. The first cell is the baseline - 5 minutes of eyes closed recordings before infusion. Each of the subsequent cells correspond to a single minute post-infusion (e.g. second cell is the 1st minute following infusion, the third cell is 2nd minute, the fourth cell is the 3rd min and so on). \
+\
+S09BB placebo recordings are up to 7 min post infusion as the rest of the data is missing (as stated above). S09LM has the last minute of PLA recording missing (so just has 20 cells = 1 baseline + 19 post infusion). \
+\
+The question is if you are interested in using the placebo recordings as a control condition we don\'92t need to exclude anybody as long as the analysis is focused on the first five mins postinfusion (thus using data_trialsmxm_3s.mat file - the first 2 cells only or only the second cell if you are not interested in the baseline). I advise that we focus the first pass analysis on this.\
+\
+To look into minute x minute changes in signal diversity then it would make sense to look at the data_trialsmxm_3s.mat file. If this is the case we have 2 options:\
+\
+If the placebo recs are used as a control condition we would only use 19 minutes post infusion in order to maintain consistency across subjs as S05LM PLA file only has 19 mins and not 20 In this case we would need to exclude S09BB. Final n = 11\
+\
+If the 5 min baseline is used as a control condition, we could stick to using only the DMT file, keep the analysis for 20 mins postinfuson and not exclude anyone - this is what I\'92ve done for the spectral correlation analysis with intensity. Final n = 12\
+\
+\
+\
+\
+}
