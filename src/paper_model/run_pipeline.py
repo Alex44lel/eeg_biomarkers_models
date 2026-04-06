@@ -10,9 +10,9 @@ from pathlib import Path
 
 import arviz as az
 
-from .prepare_data import load_and_prepare
+from .prepare_data import load_and_prepare, load_plasma_data
 from .partial_pooling_model import build_model, fit_model
-from .plot_predictions import plot_predictions
+from .plot_predictions import plot_predictions, plot_predictions_y1
 from .plot_parameters import plot_parameters
 
 RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "paper_model"
@@ -23,6 +23,8 @@ def main():
     parser.add_argument("--draws", type=int, default=1000, help="MCMC draws per chain")
     parser.add_argument("--chains", type=int, default=2, help="Number of MCMC chains")
     parser.add_argument("--load-trace", type=str, default=None, help="Path to existing trace .nc file")
+    parser.add_argument("--observe-plasma", action="store_true",
+                        help="Use real plasma DMT concentrations as observed data for y1")
     args = parser.parse_args()
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -31,6 +33,13 @@ def main():
     print("Loading and preparing data...")
     data = load_and_prepare()
     print(f"  {len(data['subject_names'])} subjects, {len(data['t_model'])} observations")
+
+    # Load plasma data if requested
+    plasma_data = None
+    if args.observe_plasma:
+        print("Loading plasma DMT data as observed variables...")
+        plasma_data = load_plasma_data(data["subject_names"])
+        print(f"  {len(plasma_data['plasma_conc'])} plasma observations")
 
     # Step 2: Build and fit model (or load existing trace)
     if args.load_trace:
@@ -41,6 +50,7 @@ def main():
         model = build_model(
             data["t_model"], data["lzc"], data["subject_idx"],
             len(data["subject_names"]),
+            plasma_data=plasma_data,
         )
         trace = fit_model(model, draws=args.draws, chains=args.chains)
 
@@ -52,6 +62,14 @@ def main():
     # Step 3: Plot predictions (Figure 26)
     print("Generating predictions plot...")
     plot_predictions(trace, data, RESULTS_DIR / "partial_pooling_predictions.png")
+
+    # Step 3b: Plot y1 (plasma DMT) — curves and predictive
+    print("Generating y1 (plasma DMT) plots...")
+    plot_predictions_y1(
+        trace, data,
+        RESULTS_DIR / "partial_pooling_y1_curves.png",
+        RESULTS_DIR / "partial_pooling_y1_predictive.png",
+    )
 
     # Step 4: Plot parameters (Figure 27)
     print("Generating parameters plot...")

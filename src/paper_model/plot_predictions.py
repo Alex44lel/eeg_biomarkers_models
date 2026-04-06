@@ -1,7 +1,9 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import arviz as az
-from .partial_pooling_model import compute_posterior_predictive
+from pathlib import Path
+from .partial_pooling_model import compute_posterior_predictive, compute_posterior_predictive_y1
 
 
 def plot_predictions(trace, data, output_path, t_max=18.0, n_grid=200):
@@ -76,3 +78,86 @@ def plot_predictions(trace, data, output_path, t_max=18.0, n_grid=200):
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"Saved predictions plot to {output_path}")
+
+
+def _plot_y1(predictions, subject_names, subject_idx_grid, t_grid, plasma_df,
+             title, output_path, t_max=18.0):
+    """Shared helper for y1 plots (curve vs predictive)."""
+    n_subjects = len(subject_names)
+    n_cols = 3
+    n_rows = 4
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 12), sharex=True)
+    axes = axes.flatten()
+
+    for i, subj_name in enumerate(subject_names):
+        ax = axes[i]
+
+        mask_grid = subject_idx_grid == i
+        t_subj = t_grid[mask_grid]
+        preds_subj = predictions[:, mask_grid]
+
+        mean_pred = preds_subj.mean(axis=0)
+        hdi_bounds = az.hdi(preds_subj, hdi_prob=0.94)
+        hdi_low = hdi_bounds[:, 0]
+        hdi_high = hdi_bounds[:, 1]
+
+        ax.plot(t_subj, mean_pred, color="black", linewidth=1.5, zorder=3, label="Model mean")
+        ax.fill_between(t_subj, hdi_low, hdi_high, color="grey", alpha=0.3, zorder=1, label="94% HDI")
+        ax.set_title(subj_name)
+        ax.set_xlim(-0.5, t_max)
+
+        # Real plasma data on secondary y-axis
+        subj_plasma = plasma_df[plasma_df["subject"] == subj_name]
+        if not subj_plasma.empty:
+            ax2 = ax.twinx()
+            ax2.scatter(
+                subj_plasma["time_min"], subj_plasma["plasma_conc"],
+                s=20, color="red", marker="x", zorder=4, label="Plasma (ng/mL)"
+            )
+            ax2.set_ylabel("Plasma (ng/mL)", fontsize=8, color="red")
+            ax2.tick_params(axis="y", labelcolor="red", labelsize=7)
+
+    for j in range(n_subjects, len(axes)):
+        axes[j].set_visible(False)
+
+    for ax in axes[n_cols * (n_rows - 1):n_cols * n_rows]:
+        if ax.get_visible():
+            ax.set_xlabel("Time post-injection (min)")
+    for r in range(n_rows):
+        axes[r * n_cols].set_ylabel("y1 (model units)")
+
+    fig.suptitle(title, fontsize=14, y=0.98)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved y1 plot to {output_path}")
+
+
+def plot_predictions_y1(trace, data, output_path_curve, output_path_predictive,
+                        t_max=18.0, n_grid=200):
+    """Generate two y1 plots: posterior curves and posterior predictive (with noise)."""
+    subject_names = data["subject_names"]
+    n_subjects = len(subject_names)
+
+    # Load real plasma data
+    plasma_path = Path(__file__).resolve().parents[2] / "data" / "plasma_clean.csv"
+    plasma_df = pd.read_csv(plasma_path)
+    plasma_df = plasma_df[plasma_df["condition"] == "dmt"]
+
+    # Build fine time grid
+    t_fine = np.linspace(0.01, t_max, n_grid)
+    t_grid = np.tile(t_fine, n_subjects)
+    subject_idx_grid = np.repeat(np.arange(n_subjects), n_grid)
+
+    # Compute both curve and predictive samples
+    curve_samples, predictive_samples = compute_posterior_predictive_y1(
+        trace, t_grid, subject_idx_grid, n_subjects
+    )
+
+    # Plot 1: Posterior curves (no observation noise)
+    _plot_y1(curve_samples, subject_names, subject_idx_grid, t_grid, plasma_df,
+             "Plasma DMT (y1) — Posterior Curves", output_path_curve, t_max)
+
+    # Plot 2: Posterior predictive (with observation noise)
+    _plot_y1(predictive_samples, subject_names, subject_idx_grid, t_grid, plasma_df,
+             "Plasma DMT (y1) — Posterior Predictive", output_path_predictive, t_max)
