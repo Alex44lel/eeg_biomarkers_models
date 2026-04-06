@@ -74,6 +74,7 @@ def compute_lzc_trial(eeg_trial):
     lzc_values = np.empty(len(ALL_CHANNELS))
     for i, ch in enumerate(range(len(ALL_CHANNELS))):
         signal = eeg[ch]
+        # binarize the signal with respect to the mean (as require by lz76)
         binary = (signal >= np.mean(signal)).astype(np.uint8)
         lzc_values[i] = lz76(binary)
     return np.mean(lzc_values)
@@ -101,10 +102,10 @@ def process_subject(mat_path):
     baseline_lzc = []
     for bl_cell_idx in range(1):
         for trial in cells[bl_cell_idx][()]["trial"]:
-            trial_ds = decimate(trial, ds_factor, axis=1)
+            trial_ds = decimate(trial, ds_factor, axis=1)  # resampling
             baseline_lzc.append(compute_lzc_trial(trial_ds))
     baseline_lzc = np.array(baseline_lzc)
-    baseline_mean = np.mean(baseline_lzc)
+    baseline_mean = np.mean(baseline_lzc)  # do the mean of all 3s lzc from baseline
     n_baseline = len(cells[0][()]["trial"])  # sequential time offset = cell 0 only
     print(f"  Baseline (cells 0): {len(baseline_lzc)} trials, mean LZc = {baseline_mean:.4f}")
 

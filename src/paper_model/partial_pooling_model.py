@@ -43,27 +43,28 @@ def build_model(t, lzc, subject_idx, n_subjects):
         # eq 16:
         y1 = (y_init_obs / (beta_obs - alpha_obs)
               * ((k2_obs - alpha_obs) * pt.exp(-alpha_obs * t_eff) - (k2_obs - beta_obs) * pt.exp(-beta_obs * t_eff)))
-        y1_det = pm.Deterministic("y1", y1)
         # Brain compartment analytical solution (eq. 17)
         # No baseline shift needed — data is already baseline-normalized
         y2 = (
             k1_obs * y_init_obs / (beta_obs - alpha_obs)
-            * (pt.exp(-alpha_obs * t_eff) - pt.exp(-beta_obs * t_eff))
+            * (pt.exp(-alpha_obs * t_eff) - pt.exp(-beta_obs * t_eff))  # type: ignore
         )
 
         # Observation noise
         lz_sigma = pm.HalfCauchy("lz_sigma", beta=1.0)
+        plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=1.0)
 
         # Likelihood
         pm.Normal("lz_obs", mu=y2, sigma=lz_sigma, observed=lzc)
+        pm.Normal("plasma_obs", mu=y1, sigma=plasma_sigma)
 
     return model
 
 
-def fit_model(model, draws=1000, chains=2):
+def fit_model(model, draws=2000, chains=2):
     """Run MCMC and return InferenceData."""
     with model:
-        trace = pm.sample(draws=draws, chains=chains, return_inferencedata=True)
+        trace = pm.sample(tune=2000, draws=draws, chains=chains, target_accept=0.9, cores=2, return_inferencedata=True)
     return trace
 
 
@@ -100,7 +101,7 @@ def compute_posterior_predictive(trace, t_grid, subject_idx_grid, n_subjects):
     alpha_g = alpha[:, subj]
     beta_g = beta[:, subj]
 
-    # Handle broadcasting (as discussed previously)
+    # Handle broadcasting
     if len(subj) != len(t_grid):
         alpha_g = alpha_g[:, :, np.newaxis]
         beta_g = beta_g[:, :, np.newaxis]
@@ -110,20 +111,20 @@ def compute_posterior_predictive(trace, t_grid, subject_idx_grid, n_subjects):
     else:
         t_g = t_grid[np.newaxis, :]
 
-    # 1. Compute the Mean Curve (Narrow HDI)
-    mean_predictions = (
+    # 1. posterior_curve_samples
+    posterior_curve_samples = (
         k1_g * y_init_g / (beta_g - alpha_g)
         * (np.exp(-alpha_g * t_g) - np.exp(-beta_g * t_g))
     )
 
     # 2. Add Observation Noise to simulate actual data (Wide HDI)
-    # Expand lz_sigma dimensions to broadcast with mean_predictions
+    # Expand lz_sigma dimensions to broadcast with posterior_curve_samples
     if len(subj) != len(t_grid):
         lz_sigma_expanded = lz_sigma[:, np.newaxis, np.newaxis]
     else:
         lz_sigma_expanded = lz_sigma[:, np.newaxis]
 
     # Draw random normal samples using the predicted mean and the sampled sigma
-    predictive_samples = np.random.normal(loc=mean_predictions, scale=lz_sigma_expanded)
+    posterior_predictive_samples = np.random.normal(loc=posterior_curve_samples, scale=lz_sigma_expanded)
 
-    return predictive_samples  # Plot the HDI of THIS to match the paper
+    return posterior_predictive_samples

@@ -16,10 +16,13 @@ def plot_parameters(trace, data, output_path):
 
     fig, axes = plt.subplots(3, 1, figsize=(12, 12), sharex=True)
 
+    # The paper reports k in units of 1/epoch (1 epoch = 0.05 min).
+    # Our model fits in minutes, so scale k values for display.
+    TIME_STEP = 1  # minutes per epoch
     for ax, param in zip(axes, param_names):
         # Shape: (chains, draws, n_subjects) -> flatten to (n_samples, n_subjects)
         samples = trace.posterior[param].values
-        samples = samples.reshape(-1, n_subjects)
+        samples = samples.reshape(-1, n_subjects) * TIME_STEP
 
         # Build list of per-subject sample arrays for boxplot
         bp_data = [samples[:, i] for i in range(n_subjects)]
@@ -52,7 +55,7 @@ def plot_parameters(trace, data, output_path):
 
     # Fix annotation positioning after all data is plotted
     for ax, param in zip(axes, param_names):
-        samples = trace.posterior[param].values.reshape(-1, n_subjects)
+        samples = trace.posterior[param].values.reshape(-1, n_subjects) * TIME_STEP
         ymin, ymax = ax.get_ylim()
         for i in range(n_subjects):
             # Clear old annotations and re-add at correct position

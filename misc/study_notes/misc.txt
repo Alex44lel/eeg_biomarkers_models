@@ -38,3 +38,6 @@ solution to the previous ODEs 13 (see section 5.2 for details).
 Last, the plasma concentrations, represented as variable plasma and LZc values, represented as variable lz, are modelled to follow normally distributed priors as plasma ∼
 N (y1, plasma sigma) lz ∼ N (y2, lz sigma). Finally, the model fitting process exclusively
 leverages variable lz as the observed variable, which is shown in the grey box
+
+
+Trace is the output of the MCMC sampling
