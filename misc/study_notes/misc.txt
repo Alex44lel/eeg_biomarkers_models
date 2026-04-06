@@ -41,3 +41,8 @@ leverages variable lz as the observed variable, which is shown in the grey box
 
 
 Trace is the output of the MCMC sampling
+
+python -m src.paper_model.run_pipeline --observe-plasma --draws 1000 --chains 2
+
+
+b(t) is stimated with lzc, so all units are lzc units
