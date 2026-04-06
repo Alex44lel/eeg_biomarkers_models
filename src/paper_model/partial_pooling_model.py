@@ -4,7 +4,8 @@ import pytensor.tensor as pt
 import arviz as az
 
 
-def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None):
+def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None,
+                observe_lzc=True):
     """Build the PyMC partial pooling two-compartment model.
 
     Args:
@@ -12,6 +13,8 @@ def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None):
             'plasma_subj_idx'. When provided, y1 is computed at the plasma
             time points and fitted to the observed plasma concentrations.
             When None, plasma_obs is an unobserved latent variable.
+        observe_lzc: if True (default), y2 is fitted to the LZc data.
+            Set to False for plasma-only fitting.
     """
     with pm.Model() as model:
         # Data containers
@@ -62,7 +65,10 @@ def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None):
         plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=1.0)
 
         # Likelihood — brain (LZc)
-        pm.Normal("lz_obs", mu=y2, sigma=lz_sigma, observed=lzc)
+        if observe_lzc:
+            pm.Normal("lz_obs", mu=y2, sigma=lz_sigma, observed=lzc)
+        else:
+            pm.Normal("lz_obs", mu=y2, sigma=lz_sigma)
 
         # Likelihood — plasma
         if plasma_data is not None:
@@ -99,19 +105,14 @@ def compute_posterior_predictive(trace, t_grid, subject_idx_grid, n_subjects):
     """Compute y2 predictions on a fine time grid from posterior samples.
 
     Returns:
-        predictions: np.array of shape (n_samples, len(t_grid))
+        (posterior_curve_samples, posterior_predictive_samples) — curve without noise, and with observation noise.
     """
     # Extract posterior samples
-    k0 = trace.posterior["k0"].values  # (chains, draws, n_subjects)
-    k1 = trace.posterior["k1"].values
-    k2 = trace.posterior["k2"].values
-    y_init = trace.posterior["y_init"].values
-
-    # Flatten chains and draws
-    k0 = k0.reshape(-1, n_subjects)
-    k1 = k1.reshape(-1, n_subjects)
-    k2 = k2.reshape(-1, n_subjects)
-    y_init = y_init.reshape(-1, n_subjects)
+    k0 = trace.posterior["k0"].values.reshape(-1, n_subjects)
+    k1 = trace.posterior["k1"].values.reshape(-1, n_subjects)
+    k2 = trace.posterior["k2"].values.reshape(-1, n_subjects)
+    y_init = trace.posterior["y_init"].values.reshape(-1, n_subjects)
+    lz_sigma = trace.posterior["lz_sigma"].values.reshape(-1)
 
     # Compute alpha, beta per sample
     s = k0 + k1 + k2
@@ -120,7 +121,6 @@ def compute_posterior_predictive(trace, t_grid, subject_idx_grid, n_subjects):
     sqrt_disc = np.sqrt(disc)
     alpha = (s - sqrt_disc) / 2.0
     beta = (s + sqrt_disc) / 2.0
-    lz_sigma = trace.posterior["lz_sigma"].values.reshape(-1)
 
     subj = np.atleast_1d(subject_idx_grid)
     k1_g = k1[:, subj]
@@ -135,26 +135,21 @@ def compute_posterior_predictive(trace, t_grid, subject_idx_grid, n_subjects):
         k1_g = k1_g[:, :, np.newaxis]
         y_init_g = y_init_g[:, :, np.newaxis]
         t_g = t_grid[np.newaxis, np.newaxis, :]
+        lz_sigma_expanded = lz_sigma[:, np.newaxis, np.newaxis]
     else:
         t_g = t_grid[np.newaxis, :]
+        lz_sigma_expanded = lz_sigma[:, np.newaxis]
 
-    # 1. posterior_curve_samples
     posterior_curve_samples = (
         k1_g * y_init_g / (beta_g - alpha_g)
         * (np.exp(-alpha_g * t_g) - np.exp(-beta_g * t_g))
     )
 
-    # 2. Add Observation Noise to simulate actual data (Wide HDI)
-    # Expand lz_sigma dimensions to broadcast with posterior_curve_samples
-    if len(subj) != len(t_grid):
-        lz_sigma_expanded = lz_sigma[:, np.newaxis, np.newaxis]
-    else:
-        lz_sigma_expanded = lz_sigma[:, np.newaxis]
+    posterior_predictive_samples = np.random.normal(
+        loc=posterior_curve_samples, scale=lz_sigma_expanded
+    )
 
-    # Draw random normal samples using the predicted mean and the sampled sigma
-    posterior_predictive_samples = np.random.normal(loc=posterior_curve_samples, scale=lz_sigma_expanded)
-
-    return posterior_predictive_samples
+    return posterior_curve_samples, posterior_predictive_samples
 
 
 def compute_posterior_predictive_y1(trace, t_grid, subject_idx_grid, n_subjects):

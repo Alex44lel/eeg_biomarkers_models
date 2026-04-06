@@ -62,6 +62,69 @@ The same recording re-cut into **fixed 3-second pieces**, sorted into **4 groups
 
 **Note**: There are no explicit group labels stored in the file. The meaning was inferred from the `sampleinfo` time ranges. The 5-minute gap between Group 0 and Group 1 corresponds to the drug injection period.
 
+### Group breakdown for all subjects (DMT, data_trials3s)
+
+| Subject | Group | Pieces | Time range |
+| ------- | ----: | -----: | ---------- |
+| S01AS | 0 | 85 | 1.1 – 6.1 min |
+| S01AS | 1 | 81 | 11.1 – 16.6 min |
+| S01AS | 2 | 81 | 16.8 – 22.4 min |
+| S01AS | 3 | 95 | 22.7 – 28.6 min |
+| S02WT | 0 | 87 | 1.0 – 6.0 min |
+| S02WT | 1 | 70 | 8.9 – 14.3 min |
+| S02WT | 2 | 83 | 14.5 – 20.3 min |
+| S02WT | 3 | 92 | 20.5 – 26.3 min |
+| S03BS | 0 | 97 | 1.2 – 6.2 min |
+| S03BS | 1 | 86 | 10.1 – 15.6 min |
+| S03BS | 2 | 89 | 15.8 – 21.6 min |
+| S03BS | 3 | 89 | 21.8 – 27.6 min |
+| S04SG | 0 | 36 | 1.1 – 6.0 min |
+| S04SG | 1 | 86 | 10.1 – 15.6 min |
+| S04SG | 2 | 93 | 15.7 – 21.6 min |
+| S04SG | 3 | 95 | 21.7 – 27.6 min |
+| S05LM | 0 | 100 | 1.5 – 6.5 min |
+| S05LM | 1 | 79 | 9.2 – 14.6 min |
+| S05LM | 2 | 94 | 14.9 – 20.7 min |
+| S05LM | 3 | 96 | 20.8 – 26.7 min |
+| S06ET | 0 | 79 | 1.5 – 6.3 min |
+| S06ET | 1 | 54 | 11.1 – 16.3 min |
+| S06ET | 2 | 86 | 16.7 – 22.2 min |
+| S06ET | 3 | 98 | 22.5 – 28.2 min |
+| S07CS | 0 | 86 | 1.2 – 6.1 min |
+| S07CS | 1 | 49 | 10.4 – 15.8 min |
+| S07CS | 2 | 72 | 16.0 – 21.9 min |
+| S07CS | 3 | 96 | 22.0 – 27.9 min |
+| S08EK | 0 | 94 | 1.2 – 6.2 min |
+| S08EK | 1 | 68 | 13.6 – 19.1 min |
+| S08EK | 2 | 79 | 19.3 – 25.1 min |
+| S08EK | 3 | 86 | 25.2 – 31.1 min |
+| S09BB | 0 | 96 | 1.2 – 6.2 min |
+| S09BB | 1 | 67 | 10.6 – 16.1 min |
+| S09BB | 2 | — | — |
+| S09BB | 3 | — | — |
+| S10DL | 0 | 83 | 1.1 – 6.1 min |
+| S10DL | 1 | 81 | 10.1 – 15.6 min |
+| S10DL | 2 | 70 | 15.7 – 21.5 min |
+| S10DL | 3 | 91 | 21.8 – 27.5 min |
+| S11NW | 0 | 90 | 1.3 – 6.2 min |
+| S11NW | 1 | 75 | 9.8 – 15.2 min |
+| S11NW | 2 | 92 | 15.4 – 21.2 min |
+| S11NW | 3 | 94 | 21.5 – 27.2 min |
+| S12AI | 0 | 98 | 1.4 – 6.4 min |
+| S12AI | 1 | 84 | 10.5 – 16.0 min |
+| S12AI | 2 | 94 | 16.1 – 22.0 min |
+| S12AI | 3 | 95 | 22.1 – 28.0 min |
+| S13MBJ | 0 | 99 | 1.5 – 6.5 min |
+| S13MBJ | 1 | 72 | 10.3 – 15.7 min |
+| S13MBJ | 2 | 89 | 15.9 – 21.7 min |
+| S13MBJ | 3 | 103 | 21.8 – 27.7 min |
+
+**Notable observations**:
+- **S09BB** only has groups 0 and 1 — groups 2 and 3 are missing, meaning the recording was cut short or data was lost after ~16 min.
+- **S04SG** has an unusually small baseline (group 0): only 36 pieces vs 79–100 for other subjects.
+- **S08EK** has a later drug administration (group 1 starts at 13.6 min vs ~9–11 min for others), shifting all subsequent groups later.
+- The gap between group 0 and group 1 varies across subjects (~3–7.5 min), reflecting different drug administration timing.
+
 ### Why fewer total samples than data_ref?
 
 When a variable-length piece is re-cut into 3-second windows, the leftover tail (< 3s) is discarded. For example, a 7.4s piece yields 2 pieces of 3s, and 1.4s is thrown away.

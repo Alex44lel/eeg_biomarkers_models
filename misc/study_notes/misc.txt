@@ -43,6 +43,13 @@ leverages variable lz as the observed variable, which is shown in the grey box
 Trace is the output of the MCMC sampling
 
 python -m src.paper_model.run_pipeline --observe-plasma --draws 1000 --chains 2
+Available flags:
+  - --observe-plasma — fit both LZc + plasma
+  - --plasma-only — fit plasma only (no LZc)
+  - Neither — fit LZc only (original behavior)
+  - --load-trace
 
 
-b(t) is stimated with lzc, so all units are lzc units
+b(t) is stimated with lzc, so all units are lzc units. we can not predict mg/ml
+
+- esta fiteando el modelo con un gap de tiempo en el medio (creo que eso esta mal)

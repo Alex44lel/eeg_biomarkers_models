@@ -12,7 +12,7 @@ import arviz as az
 
 from .prepare_data import load_and_prepare, load_plasma_data
 from .partial_pooling_model import build_model, fit_model
-from .plot_predictions import plot_predictions, plot_predictions_y1
+from .plot_predictions import plot_predictions, plot_predictions_y1, plot_predictions_y2
 from .plot_parameters import plot_parameters
 
 RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "paper_model"
@@ -25,6 +25,8 @@ def main():
     parser.add_argument("--load-trace", type=str, default=None, help="Path to existing trace .nc file")
     parser.add_argument("--observe-plasma", action="store_true",
                         help="Use real plasma DMT concentrations as observed data for y1")
+    parser.add_argument("--plasma-only", action="store_true",
+                        help="Fit model using only plasma DMT data (no LZc likelihood)")
     args = parser.parse_args()
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -36,7 +38,13 @@ def main():
 
     # Load plasma data if requested
     plasma_data = None
-    if args.observe_plasma:
+    observe_lzc = True
+    if args.plasma_only:
+        print("Loading plasma DMT data (plasma-only mode, no LZc likelihood)...")
+        plasma_data = load_plasma_data(data["subject_names"])
+        observe_lzc = False
+        print(f"  {len(plasma_data['plasma_conc'])} plasma observations")
+    elif args.observe_plasma:
         print("Loading plasma DMT data as observed variables...")
         plasma_data = load_plasma_data(data["subject_names"])
         print(f"  {len(plasma_data['plasma_conc'])} plasma observations")
@@ -51,6 +59,7 @@ def main():
             data["t_model"], data["lzc"], data["subject_idx"],
             len(data["subject_names"]),
             plasma_data=plasma_data,
+            observe_lzc=observe_lzc,
         )
         trace = fit_model(model, draws=args.draws, chains=args.chains)
 
@@ -69,6 +78,14 @@ def main():
         trace, data,
         RESULTS_DIR / "partial_pooling_y1_curves.png",
         RESULTS_DIR / "partial_pooling_y1_predictive.png",
+    )
+
+    # Step 3c: Plot y2 (brain LZc) — curves and predictive with plasma overlay
+    print("Generating y2 (brain LZc) dual-axis plots...")
+    plot_predictions_y2(
+        trace, data,
+        RESULTS_DIR / "partial_pooling_y2_curves.png",
+        RESULTS_DIR / "partial_pooling_y2_predictive.png",
     )
 
     # Step 4: Plot parameters (Figure 27)

@@ -36,11 +36,16 @@ def load_and_prepare(exclude_subjects=None):
     subj_to_idx = {s: i for i, s in enumerate(subject_names)}
     df["subject_idx"] = df["subject"].map(subj_to_idx)
 
+    # Per-subject injection time (aligned with subject_names order)
+    inj_map = df.groupby("subject")["injection_time_min"].first()
+    injection_times = [inj_map[s] for s in subject_names]
+
     return {
         "t_model": df["t_model"].values.astype(np.float64),
         "lzc": df["lzc"].values.astype(np.float64),
         "subject_idx": df["subject_idx"].values.astype(np.int64),
         "subject_names": subject_names,
+        "injection_times": injection_times,
     }
 
 
