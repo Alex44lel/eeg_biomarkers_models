@@ -27,6 +27,8 @@ def main():
                         help="Use real plasma DMT concentrations as observed data for y1")
     parser.add_argument("--plasma-only", action="store_true",
                         help="Fit model using only plasma DMT data (no LZc likelihood)")
+    parser.add_argument("--only-after-injection", action="store_true",
+                        help="Restrict LZc data to post-injection samples only")
     args = parser.parse_args()
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -34,7 +36,21 @@ def main():
     # Step 1: Prepare data
     print("Loading and preparing data...")
     data = load_and_prepare()
+    full_data = data  # keep unfiltered copy for plotting
     print(f"  {len(data['subject_names'])} subjects, {len(data['t_model'])} observations")
+
+    # Filter to post-injection only if requested (for model fitting only)
+    if args.only_after_injection:
+        import numpy as np
+        inj_times = np.array(data["injection_times"])
+        mask = data["t_model"] >= inj_times[data["subject_idx"]]
+        data = {
+            **data,
+            "t_model": data["t_model"][mask],
+            "lzc": data["lzc"][mask],
+            "subject_idx": data["subject_idx"][mask],
+        }
+        print(f"  After filtering to post-injection: {mask.sum()} / {len(mask)} observations kept")
 
     # Load plasma data if requested
     plasma_data = None
@@ -68,14 +84,14 @@ def main():
         trace.to_netcdf(str(trace_path))
         print(f"  Trace saved to {trace_path}")
 
-    # Step 3: Plot predictions (Figure 26)
+    # Step 3: Plot predictions (Figure 26) — use full_data so pre-injection points appear
     print("Generating predictions plot...")
-    plot_predictions(trace, data, RESULTS_DIR / "partial_pooling_predictions.png")
+    plot_predictions(trace, full_data, RESULTS_DIR / "partial_pooling_predictions.png")
 
     # Step 3b: Plot y1 (plasma DMT) — curves and predictive
     print("Generating y1 (plasma DMT) plots...")
     plot_predictions_y1(
-        trace, data,
+        trace, full_data,
         RESULTS_DIR / "partial_pooling_y1_curves.png",
         RESULTS_DIR / "partial_pooling_y1_predictive.png",
     )
@@ -83,14 +99,14 @@ def main():
     # Step 3c: Plot y2 (brain LZc) — curves and predictive with plasma overlay
     print("Generating y2 (brain LZc) dual-axis plots...")
     plot_predictions_y2(
-        trace, data,
+        trace, full_data,
         RESULTS_DIR / "partial_pooling_y2_curves.png",
         RESULTS_DIR / "partial_pooling_y2_predictive.png",
     )
 
     # Step 4: Plot parameters (Figure 27)
     print("Generating parameters plot...")
-    plot_parameters(trace, data, RESULTS_DIR / "partial_pooling_parameters.png")
+    plot_parameters(trace, full_data, RESULTS_DIR / "partial_pooling_parameters.png")
 
     print("Done!")
 

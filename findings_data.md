@@ -27,15 +27,28 @@ Analysis based on subject S01AS, DMT condition. All subjects follow the same str
 
 ## File 1: data_ref.mat
 
-The raw continuous recording, cut into **irregular** pieces.
+The raw continuous recording, cut into **irregular** pieces. The pieces are not truly continuous — small gaps between them correspond to segments rejected during artifact cleaning (e.g. eye blinks, muscle noise).
 
 - **Key**: `data_ref`
 - **Number of pieces**: 106
 - **Piece length**: variable (0.1s to 56s, mean 11.95s)
 - **Total data**: 1,266,945 samples per channel (1266.9s = 21.1 min)
-- **Time range**: 1.1 min – 30.6 min
+- **Wall-clock span**: 1.1 min – 30.6 min (29.5 min)
+- **Total gap time**: 501.1s (8.4 min), of which ~298s is the drug administration gap
 
 Each piece is a matrix of shape `(36, N)` where N varies per piece.
+
+### Time structure of data_ref (S01AS/DMT)
+
+The recording has two major blocks, separated by a ~5 min gap during drug injection:
+
+| Block | Pieces | Time range | Data duration | Meaning |
+| ----- | ------ | ---------- | ------------- | ------- |
+| Pre-drug | 0–20 (21 pieces) | 1.1 – 6.1 min | 287.2s (4.8 min) | Baseline before injection |
+| — | — | 6.1 – 11.1 min | — | GAP: drug administration (~298s) |
+| Post-drug | 21–105 (85 pieces) | 11.1 – 30.6 min | 979.7s (16.3 min) | Full post-drug recording |
+
+Within each block, there are many small gaps (104 total, mean 1.95s, total 203.1s) where artifact-contaminated segments were removed. These small gaps are why the actual data (21.1 min) is less than the wall-clock span (29.5 min).
 
 This is the unprocessed starting point from which the other two files were derived.
 

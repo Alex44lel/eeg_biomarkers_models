@@ -74,6 +74,12 @@ def load_plasma_data(subject_names, exclude_subjects=None):
     # Keep only subjects present in the model
     pdf = pdf[pdf["subject"].isin(subject_names)]
 
+    # Shift plasma times: time_min=0 is injection, add injection offset
+    # so times align with the LZc recording-start reference
+    offsets_df = pd.read_csv(RESULTS_DIR / "lzc" / "injection_offsets.csv")
+    offset_map = offsets_df.set_index("subject")["injection_time_min"]
+    pdf["time_min"] = pdf["time_min"] + pdf["subject"].map(offset_map)
+
     subj_to_idx = {s: i for i, s in enumerate(subject_names)}
     pdf["subject_idx"] = pdf["subject"].map(subj_to_idx)
 

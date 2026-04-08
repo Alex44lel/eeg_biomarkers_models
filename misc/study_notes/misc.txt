@@ -48,8 +48,34 @@ Available flags:
   - --plasma-only — fit plasma only (no LZc)
   - Neither — fit LZc only (original behavior)
   - --load-trace
+    --only-after-injection
 
+-solo ha utilizado lzc para fittear
 
 b(t) is stimated with lzc, so all units are lzc units. we can not predict mg/ml
 
 - esta fiteando el modelo con un gap de tiempo en el medio (creo que eso esta mal)
+
+- to compartment es uno para el cerebro y otro para la sangre, pero claramente en la sangre solo va a decrecer, tbm por como se ve en la diff eccuation
+
+
+I assume the dmt data starts collecting at injection time
+
+
+No podemos utilizar este modelo a no ser que queramos predecir LZC
+
+
+- 
+- are we trying to predict DMT concentration on brain or on blood?
+
+
+
+
+
+
+
+
+
+
+
+
