@@ -50,30 +50,49 @@ Available flags:
   - --load-trace
     --only-after-injection
 
--solo ha utilizado lzc para fittear
+
+--------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------
+
+
+- solo ha utilizado lzc para fittear,
 
 b(t) is stimated with lzc, so all units are lzc units. we can not predict mg/ml
 
-- esta fiteando el modelo con un gap de tiempo en el medio (creo que eso esta mal)
+- esta fiteando el modelo con un gap de tiempo en el medio (creo que eso esta mal) (he probado a fittearlo tbm post injection)
 
 - to compartment es uno para el cerebro y otro para la sangre, pero claramente en la sangre solo va a decrecer, tbm por como se ve en la diff eccuation
 
 
-I assume the dmt data starts collecting at injection time
+- I assume the dmt data starts collecting at injection time (nosotros solo tenemos 5 y en el otro paper 9)
+
+- No podemos utilizar este modelo a no ser que queramos predecir LZC
+
+- El modelo que te enseñe la semana pasada podría ser una alternativa (sino el paper que me diste aunque ahi todos los del mismo grupo a la vez y no esta nada especificado los detalles)
+
+- are we trying to predict DMT concentration on brain or on blood? supongo que blood porque brain no la sabemos
 
 
-No podemos utilizar este modelo a no ser que queramos predecir LZC
+- Experimento para diferenciar entre pre injection y post injection. Pille 5 mins antes y despues de la injección.
+  -SimpleCNN -> funciona
+  -Graphormer -> funciona
+    - Node features = spectral band power (5 values per node)
+      -  Power Spectral Density (PSD), integrate over range, log
+    - Edge features = amplitude envelope correlation (1 value per edge)
+      - Hilbert transform, extract amplitude envelope, pearson correlation
+    - SPD is one
 
 
-- 
-- are we trying to predict DMT concentration on brain or on blood?
 
 
 
 
+#
 
-
-
+fitear usando la concentracion en plasma y tissue response hill equation. solo post injection
+  - e_max es 1, E= lz, A=y2, EC y n se fittean
 
 
 

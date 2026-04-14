@@ -55,6 +55,7 @@ def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None,
               * ((k2_obs - alpha_obs) * pt.exp(-alpha_obs * t_eff) - (k2_obs - beta_obs) * pt.exp(-beta_obs * t_eff)))
         # Brain compartment analytical solution (eq. 17)
         # No baseline shift needed — data is already baseline-normalized
+
         y2 = (
             k1_obs * y_init_obs / (beta_obs - alpha_obs)
             * (pt.exp(-alpha_obs * t_eff) - pt.exp(-beta_obs * t_eff))  # type: ignore
@@ -65,6 +66,7 @@ def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None,
         plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=1.0)
 
         # Likelihood — brain (LZc)
+        # lo paso por una ecuación de hill
         if observe_lzc:
             pm.Normal("lz_obs", mu=y2, sigma=lz_sigma, observed=lzc)
         else:

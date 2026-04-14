@@ -7,19 +7,20 @@ We have EEG recordings from 10 subjects during a DMT experiment. Each recording 
 **32 EEG channels** (excluding ECG, VEOG, EMGfront, EMGtemp).
 
 Each trial has a label:
+
 - **0** = pre-injection (baseline)
 - **1** = post-injection (DMT effect)
 
 The dataset is balanced per subject: the number of pre-injection trials is trimmed to match
 the number of post-injection trials.
 
-| Property | Value |
-|----------|-------|
-| Total trials | 1152 |
-| Channels kept | 32 (standard 10-10 EEG electrodes) |
-| Samples per trial | 3000 (3 seconds at 1000 Hz) |
-| Subjects | 10 (S01, S02, S04, S05, S06, S07, S08, S10, S12, S13) |
-| Labels | 0 (pre, ~559 trials) vs 1 (post, ~593 trials) |
+| Property          | Value                                                 |
+| ----------------- | ----------------------------------------------------- |
+| Total trials      | 1152                                                  |
+| Channels kept     | 32 (standard 10-10 EEG electrodes)                    |
+| Samples per trial | 3000 (3 seconds at 1000 Hz)                           |
+| Subjects          | 10 (S01, S02, S04, S05, S06, S07, S08, S10, S12, S13) |
+| Labels            | 0 (pre, ~559 trials) vs 1 (post, ~593 trials)         |
 
 ---
 
@@ -30,7 +31,7 @@ Each 3-second trial is converted into a **graph** where:
 ```
 Nodes = EEG channels (32 nodes)
 Node features = spectral band power (5 values per node)
-Edges = all channel pairs (fully connected, 32x31 = 992 directed edges)
+Edges = all channel pairs (fully connected, 32x32  = 992 directed edges)
 Edge features = amplitude envelope correlation (1 value per edge)
 ```
 
@@ -39,13 +40,13 @@ Edge features = amplitude envelope correlation (1 value per edge)
 For each of the 32 channels, we compute how much power the signal has in each standard
 EEG frequency band:
 
-| Band | Frequency range | What it captures |
-|------|----------------|------------------|
-| Delta | 1 - 4 Hz | Deep sleep, unconscious processes |
-| Theta | 4 - 8 Hz | Drowsiness, meditation, memory |
-| Alpha | 8 - 13 Hz | Relaxed wakefulness, eyes closed |
-| Beta | 13 - 30 Hz | Active thinking, focus, alertness |
-| Gamma | 30 - 45 Hz | Higher cognitive functions, binding |
+| Band  | Frequency range | What it captures                    |
+| ----- | --------------- | ----------------------------------- |
+| Delta | 1 - 4 Hz        | Deep sleep, unconscious processes   |
+| Theta | 4 - 8 Hz        | Drowsiness, meditation, memory      |
+| Alpha | 8 - 13 Hz       | Relaxed wakefulness, eyes closed    |
+| Beta  | 13 - 30 Hz      | Active thinking, focus, alertness   |
+| Gamma | 30 - 45 Hz      | Higher cognitive functions, binding |
 
 **How we compute it:**
 
@@ -100,7 +101,7 @@ coordinates of that electrode on the scalp, based on the standard 10-10 system.
 - y = posterior(-) to anterior(+)
 - z = inferior(-) to superior(+)
 
-These tell the model *where* each channel is physically located, which can help it learn
+These tell the model _where_ each channel is physically located, which can help it learn
 spatial patterns. Without coords, the model only sees the spectral/connectivity features
 and must infer spatial relationships from the data alone.
 
@@ -128,6 +129,7 @@ rather than graph topology.
 ## 3. The Model: VGAE + Classifier
 
 The model has two objectives:
+
 1. **Reconstruct** the input graph (VGAE — learn a good representation)
 2. **Classify** pre vs post injection (the actual task)
 
@@ -177,11 +179,13 @@ Input graph (32 nodes, 992 edges)
 This is the core of the model. It's a transformer adapted for graphs.
 
 **Standard transformer attention:**
+
 ```
 attention(i, j) = softmax(Q_i · K_j / √d)
 ```
 
 **Graphormer attention adds two bias terms:**
+
 ```
 attention(i, j) = softmax(Q_i · K_j / √d  +  spd_bias(i,j)  +  edge_bias(i,j))
 ```
@@ -194,6 +198,7 @@ attention(i, j) = softmax(Q_i · K_j / √d  +  spd_bias(i,j)  +  edge_bias(i,j)
   correlated channels get different attention patterns than weakly correlated ones.
 
 The encoder stacks 3 of these transformer layers, each with:
+
 1. Edge-aware multi-head self-attention
 2. Residual connection + LayerNorm
 3. Feedforward MLP (2-layer, ReLU)
@@ -245,6 +250,7 @@ total_loss = vgae_loss + cls_weight * classification_loss
 ```
 
 Where:
+
 - `vgae_loss` = node reconstruction MSE + edge reconstruction MSE + KL divergence
 - `classification_loss` = CrossEntropyLoss(logits, label)
 - `cls_weight` controls the balance (default 1.0)

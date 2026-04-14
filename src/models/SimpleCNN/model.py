@@ -39,7 +39,6 @@ class SimpleCNN(nn.Module):
         )
         self.se1 = SE(32)
         self.drop1 = nn.Dropout(dropout)
-
         self.block2 = nn.Sequential(
             nn.Conv1d(32, 64, kernel_size=7, stride=4, padding=3),
             nn.BatchNorm1d(64),
