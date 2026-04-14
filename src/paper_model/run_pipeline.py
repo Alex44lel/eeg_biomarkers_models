@@ -12,7 +12,7 @@ import arviz as az
 
 from .prepare_data import load_and_prepare, load_plasma_data
 from .partial_pooling_model import build_model, fit_model
-from .plot_predictions import plot_predictions_y1
+from .plot_predictions import plot_predictions_y1, plot_predictions_y2
 from .plot_parameters import plot_parameters
 
 RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "paper_model"
@@ -47,7 +47,6 @@ def main():
     elif args.observe_plasma:
         print("Loading plasma DMT data as observed variables...")
         plasma_data = load_plasma_data(data["subject_names"])
-        data["plasma_max_ngml"] = plasma_data["plasma_max_ngml"]
         print(f"  {len(plasma_data['plasma_conc'])} plasma observations")
 
     # Step 2: Build and fit model (or load existing trace)
@@ -75,6 +74,14 @@ def main():
         trace, data,
         RESULTS_DIR / "partial_pooling_y1_curves.png",
         RESULTS_DIR / "partial_pooling_y1_predictive.png",
+    )
+
+    # Step 3b: Plot y2 (brain LZc) — curves and predictive
+    print("Generating y2 (brain LZc) plots...")
+    plot_predictions_y2(
+        trace, data,
+        RESULTS_DIR / "partial_pooling_y2_curves.png",
+        RESULTS_DIR / "partial_pooling_y2_predictive.png",
     )
 
     # Step 4: Plot parameters (Figure 27)

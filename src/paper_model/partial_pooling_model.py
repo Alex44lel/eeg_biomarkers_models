@@ -93,7 +93,10 @@ def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None,
                 * ((k2_p - alpha_p) * pt.exp(-alpha_p * plasma_t_data)
                    - (k2_p - beta_p) * pt.exp(-beta_p * plasma_t_data))
             )
-            pm.Normal("plasma_obs", mu=y1_plasma, sigma=plasma_sigma,
+            # plasma_scale converts model units to ng/mL
+            plasma_scale = pm.HalfNormal("plasma_scale", sigma=500)
+            pm.Normal("plasma_obs", mu=y1_plasma * plasma_scale,
+                      sigma=plasma_sigma,
                       observed=plasma_data["plasma_conc"])
         else:
             pm.Normal("plasma_obs", mu=y1, sigma=plasma_sigma)
@@ -184,6 +187,45 @@ def compute_posterior_predictive(trace, t_grid, subject_idx_grid, n_subjects):
     )
 
     return posterior_curve_samples, posterior_predictive_samples
+
+
+def compute_posterior_predictive_y2_raw(trace, t_grid, subject_idx_grid, n_subjects):
+    """Compute raw y2 (brain concentration) without Hill equation.
+
+    Returns:
+        posterior_curve_samples — raw brain drug concentration in model units.
+    """
+    k0 = trace.posterior["k0"].values.reshape(-1, n_subjects)
+    k1 = trace.posterior["k1"].values.reshape(-1, n_subjects)
+    k2 = trace.posterior["k2"].values.reshape(-1, n_subjects)
+    y_init = trace.posterior["y_init"].values.reshape(-1, n_subjects)
+
+    s = k0 + k1 + k2
+    p = k0 * k2
+    disc = np.maximum(s ** 2 - 4.0 * p, 1e-12)
+    sqrt_disc = np.sqrt(disc)
+    alpha = (s - sqrt_disc) / 2.0
+    beta = (s + sqrt_disc) / 2.0
+
+    subj = np.atleast_1d(subject_idx_grid)
+    k1_g = k1[:, subj]
+    y_init_g = y_init[:, subj]
+    alpha_g = alpha[:, subj]
+    beta_g = beta[:, subj]
+
+    if len(subj) != len(t_grid):
+        alpha_g = alpha_g[:, :, np.newaxis]
+        beta_g = beta_g[:, :, np.newaxis]
+        k1_g = k1_g[:, :, np.newaxis]
+        y_init_g = y_init_g[:, :, np.newaxis]
+        t_g = t_grid[np.newaxis, np.newaxis, :]
+    else:
+        t_g = t_grid[np.newaxis, :]
+
+    return (
+        k1_g * y_init_g / (beta_g - alpha_g)
+        * (np.exp(-alpha_g * t_g) - np.exp(-beta_g * t_g))
+    )
 
 
 def compute_posterior_predictive_y1(trace, t_grid, subject_idx_grid, n_subjects):

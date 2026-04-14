@@ -81,13 +81,8 @@ def load_plasma_data(subject_names, exclude_subjects=None):
     subj_to_idx = {s: i for i, s in enumerate(subject_names)}
     pdf["subject_idx"] = pdf["subject"].map(subj_to_idx)
 
-    # Normalize plasma concentrations to [0, 1]
-    plasma_max = pdf["plasma_conc"].max()
-    print(f"  Plasma normalization factor: {plasma_max:.1f} ng/mL")
-
     return {
         "plasma_t": pdf["time_min"].values.astype(np.float64),
-        "plasma_conc": (pdf["plasma_conc"] / plasma_max).values.astype(np.float64),
+        "plasma_conc": pdf["plasma_conc"].values.astype(np.float64),
         "plasma_subj_idx": pdf["subject_idx"].values.astype(np.int64),
-        "plasma_max_ngml": plasma_max,
     }
