@@ -96,5 +96,10 @@ fitear usando la concentracion en plasma y tissue response hill equation. solo p
 
 
 
+$$\frac{E}{E_{\max}} = \frac{[A]^n}{\text{EC}_{50}^n + [A]^n}$$ 
+
+
+drug concentration in the brain doesn't translate 1:1 into a brain complexity change.Hill equation is a dose-response function that maps a drug 
+  concentration to an effect.
 
 

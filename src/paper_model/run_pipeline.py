@@ -12,7 +12,7 @@ import arviz as az
 
 from .prepare_data import load_and_prepare, load_plasma_data
 from .partial_pooling_model import build_model, fit_model
-from .plot_predictions import plot_predictions, plot_predictions_y1, plot_predictions_y2
+from .plot_predictions import plot_predictions_y1
 from .plot_parameters import plot_parameters
 
 RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "paper_model"
@@ -27,30 +27,14 @@ def main():
                         help="Use real plasma DMT concentrations as observed data for y1")
     parser.add_argument("--plasma-only", action="store_true",
                         help="Fit model using only plasma DMT data (no LZc likelihood)")
-    parser.add_argument("--only-after-injection", action="store_true",
-                        help="Restrict LZc data to post-injection samples only")
     args = parser.parse_args()
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Step 1: Prepare data
+    # Step 1: Prepare data (t=0 is injection time, only post-injection)
     print("Loading and preparing data...")
     data = load_and_prepare()
-    full_data = data  # keep unfiltered copy for plotting
     print(f"  {len(data['subject_names'])} subjects, {len(data['t_model'])} observations")
-
-    # Filter to post-injection only if requested (for model fitting only)
-    if args.only_after_injection:
-        import numpy as np
-        inj_times = np.array(data["injection_times"])
-        mask = data["t_model"] >= inj_times[data["subject_idx"]]
-        data = {
-            **data,
-            "t_model": data["t_model"][mask],
-            "lzc": data["lzc"][mask],
-            "subject_idx": data["subject_idx"][mask],
-        }
-        print(f"  After filtering to post-injection: {mask.sum()} / {len(mask)} observations kept")
 
     # Load plasma data if requested
     plasma_data = None
@@ -63,6 +47,7 @@ def main():
     elif args.observe_plasma:
         print("Loading plasma DMT data as observed variables...")
         plasma_data = load_plasma_data(data["subject_names"])
+        data["plasma_max_ngml"] = plasma_data["plasma_max_ngml"]
         print(f"  {len(plasma_data['plasma_conc'])} plasma observations")
 
     # Step 2: Build and fit model (or load existing trace)
@@ -84,29 +69,17 @@ def main():
         trace.to_netcdf(str(trace_path))
         print(f"  Trace saved to {trace_path}")
 
-    # Step 3: Plot predictions (Figure 26) — use full_data so pre-injection points appear
-    print("Generating predictions plot...")
-    plot_predictions(trace, full_data, RESULTS_DIR / "partial_pooling_predictions.png")
-
-    # Step 3b: Plot y1 (plasma DMT) — curves and predictive
+    # Step 3: Plot y1 (plasma DMT) — curves and predictive
     print("Generating y1 (plasma DMT) plots...")
     plot_predictions_y1(
-        trace, full_data,
+        trace, data,
         RESULTS_DIR / "partial_pooling_y1_curves.png",
         RESULTS_DIR / "partial_pooling_y1_predictive.png",
     )
 
-    # Step 3c: Plot y2 (brain LZc) — curves and predictive with plasma overlay
-    print("Generating y2 (brain LZc) dual-axis plots...")
-    plot_predictions_y2(
-        trace, full_data,
-        RESULTS_DIR / "partial_pooling_y2_curves.png",
-        RESULTS_DIR / "partial_pooling_y2_predictive.png",
-    )
-
     # Step 4: Plot parameters (Figure 27)
     print("Generating parameters plot...")
-    plot_parameters(trace, full_data, RESULTS_DIR / "partial_pooling_parameters.png")
+    plot_parameters(trace, data, RESULTS_DIR / "partial_pooling_parameters.png")
 
     print("Done!")
 

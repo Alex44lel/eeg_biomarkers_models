@@ -38,12 +38,8 @@ SUBJECT_FOLDERS = {
 }
 
 
-def lz76(binary_array):
-    """Compute LZ76 complexity of a binary sequence, normalized by n/log2(n)."""
-    n = len(binary_array)
-    if n <= 1:
-        return 0.0
-    s = binary_array.tobytes()
+def _lz76_count(s, n):
+    """Count LZ76 distinct substrings from a bytes object of length n."""
     sub_strings = set()
     ind = 0
     inc = 1
@@ -55,7 +51,28 @@ def lz76(binary_array):
             sub_strings.add(sub_str)
             ind += inc
             inc = 1
-    return len(sub_strings) / (n / np.log2(n))
+    return len(sub_strings)
+
+
+def lz76(binary_array):
+    """Compute normalized LZ76 complexity using surrogate normalization.
+
+    Divides by the complexity of a shuffled version of the same sequence
+    (Casali et al. 2013), guaranteeing values in [0, 1].
+    """
+    n = len(binary_array)
+    if n <= 1:
+        return 0.0
+    if len(np.unique(binary_array)) <= 1:
+        return 0.0
+    s = binary_array.tobytes()
+    c = _lz76_count(s, n)
+    # Surrogate: shuffle to destroy temporal structure (max complexity)
+    shuffled = np.random.permutation(binary_array).astype(np.uint8)
+    c_surr = _lz76_count(shuffled.tobytes(), n)
+    if c_surr == 0:
+        return 0.0
+    return min(c / c_surr, 1.0)
 
 
 def compute_lzc_trial(eeg_trial):
@@ -90,24 +107,15 @@ def process_subject(mat_path):
 
     Returns
     -------
-    df : DataFrame with columns ['time_min', 'lzc_normalized', 'injection_time_min']
+    df : DataFrame with columns ['time_min', 'lzc_raw']
     """
     print(f"  Loading {mat_path}...")
     d = sio.loadmat(mat_path, squeeze_me=True)
     cells = d["data_trialsmxm_3s"]
     ds_factor = 5  # 1000Hz -> 200Hz
 
-    # --- Baseline (cells 0 + 1) ---
-    # Cell 0: pre-injection baseline
-    baseline_lzc = []
-    for bl_cell_idx in range(1):
-        for trial in cells[bl_cell_idx][()]["trial"]:
-            trial_ds = decimate(trial, ds_factor, axis=1)  # resampling
-            baseline_lzc.append(compute_lzc_trial(trial_ds))
-    baseline_lzc = np.array(baseline_lzc)
-    baseline_mean = np.mean(baseline_lzc)  # do the mean of all 3s lzc from baseline
-    n_baseline = len(cells[0][()]["trial"])  # sequential time offset = cell 0 only
-    print(f"  Baseline (cells 0): {len(baseline_lzc)} trials, mean LZc = {baseline_mean:.4f}")
+    # Count baseline trials to determine injection time
+    n_baseline = len(cells[0][()]["trial"])
 
     # --- All cells: sequential trial time ---
     all_lzc = []
@@ -130,20 +138,15 @@ def process_subject(mat_path):
     all_lzc = np.array(all_lzc)
     all_times = np.array(all_times)
 
-    # Normalize: percentage change relative to baseline mean
-    lzc_normalized = (all_lzc - baseline_mean) / baseline_mean * 100
-
     # Injection time on the sequential scale (after all baseline trials)
     injection_time_min = n_baseline * 3.0 / 60.0
 
     print(f"  Total: {len(all_lzc)} trials, injection at {injection_time_min:.1f} min, "
-          f"LZc range [{lzc_normalized.min():.1f}, {lzc_normalized.max():.1f}]")
+          f"LZc range [{all_lzc.min():.4f}, {all_lzc.max():.4f}]")
 
     df = pd.DataFrame({
         "time_min": all_times,
         "lzc_raw": all_lzc,
-        "lzc_normalized": lzc_normalized,
-        "baseline_mean": baseline_mean,
     })
     df.attrs["injection_time_min"] = injection_time_min
     return df, injection_time_min
@@ -186,6 +189,42 @@ def main():
             columns=["subject", "injection_time_min"],
         )
         offsets_df.to_csv(results_dir / "injection_offsets.csv", index=False)
+
+        # Plot LZc values per subject
+        import matplotlib.pyplot as plt
+
+        subjects = sorted(combined["subject"].unique())
+        n_cols = 3
+        n_rows = (len(subjects) + n_cols - 1) // n_cols
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 3 * n_rows),
+                                 sharex=True, sharey=True)
+        axes = axes.flatten()
+
+        for i, subj in enumerate(subjects):
+            ax = axes[i]
+            subj_df = combined[combined["subject"] == subj]
+            inj_t = injection_offsets.get(subj, None)
+            ax.scatter(subj_df["time_min"], subj_df["lzc_raw"],
+                       s=4, alpha=0.5, color="steelblue")
+            if inj_t is not None:
+                ax.axvline(inj_t, color="red", linestyle="--", linewidth=1)
+            ax.set_title(subj)
+            ax.set_ylim(0, 1.05)
+
+        for j in range(len(subjects), len(axes)):
+            axes[j].set_visible(False)
+        for ax in axes[n_cols * (n_rows - 1):]:
+            if ax.get_visible():
+                ax.set_xlabel("Time (min)")
+        for r in range(n_rows):
+            axes[r * n_cols].set_ylabel("LZc")
+
+        fig.suptitle("Raw LZc per subject (red = injection time)", fontsize=14, y=1.0)
+        plt.tight_layout()
+        plot_path = results_dir / "lzc_raw_all_subjects.png"
+        plt.savefig(plot_path, dpi=150, bbox_inches="tight")
+        plt.close()
+        print(f"Saved LZc plot to {plot_path}")
 
         print(f"\nSaved results to {out_path}")
         print(f"Subjects processed: {list(all_results.keys())}")

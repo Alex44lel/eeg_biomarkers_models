@@ -6,21 +6,21 @@ from pathlib import Path
 from .partial_pooling_model import compute_posterior_predictive, compute_posterior_predictive_y1
 
 
-def plot_predictions(trace, data, output_path, t_max=21.0, n_grid=200):
+def plot_predictions(trace, data, output_path, t_max=15.0, n_grid=200):
     """Plot per-subject model predictions vs observed data (Figure 26 replica).
 
     Args:
         trace: ArviZ InferenceData with posterior samples.
         data: dict from prepare_data.load_and_prepare().
         output_path: Path to save the figure.
-        t_max: maximum time on x-axis.
+        t_max: maximum time on x-axis (minutes since injection).
         n_grid: number of points in the fine time grid per subject.
     """
     subject_names = data["subject_names"]
     n_subjects = len(subject_names)
 
-    # Build a fine time grid for each subject
-    t_fine = np.linspace(0.01, t_max, n_grid)
+    # Build a fine time grid for each subject (t=0 is injection)
+    t_fine = np.linspace(0, t_max, n_grid)
     t_grid = np.tile(t_fine, n_subjects)
     subject_idx_grid = np.repeat(np.arange(n_subjects), n_grid)
 
@@ -33,8 +33,6 @@ def plot_predictions(trace, data, output_path, t_max=21.0, n_grid=200):
     n_rows = 4
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 12), sharex=True, sharey=True)
     axes = axes.flatten()
-
-    injection_times = data["injection_times"]
 
     for i, subj_name in enumerate(subject_names):
         ax = axes[i]
@@ -57,14 +55,9 @@ def plot_predictions(trace, data, output_path, t_max=21.0, n_grid=200):
         ax.scatter(t_obs, lzc_obs, s=8, color="purple", alpha=0.5, zorder=2)
         ax.plot(t_subj, mean_pred, color="black", linewidth=1.5, zorder=3)
         ax.fill_between(t_subj, hdi_low, hdi_high, color="grey", alpha=0.3, zorder=1)
-        ax.axvline(injection_times[i], color="green", linestyle="--", linewidth=1,
-                   zorder=4, label="Injection time" if i == 0 else None)
         ax.set_title(subj_name)
-        ax.set_xlim(-0.5, t_max)
+        ax.set_xlim(0, t_max)
         ax.set_ylim(0, 3.2)
-
-    # Add legend on first subplot
-    axes[0].legend(fontsize=6, loc="upper right")
 
     # Hide unused subplots
     for j in range(n_subjects, len(axes)):
@@ -73,7 +66,7 @@ def plot_predictions(trace, data, output_path, t_max=21.0, n_grid=200):
     # Shared labels
     for ax in axes[n_cols * (n_rows - 1):n_cols * n_rows]:
         if ax.get_visible():
-            ax.set_xlabel("Fake time (min)")
+            ax.set_xlabel("Time since injection (min)")
     for r in range(n_rows):
         axes[r * n_cols].set_ylabel("LZc")
 
@@ -89,7 +82,7 @@ def plot_predictions(trace, data, output_path, t_max=21.0, n_grid=200):
 
 def _plot_dual_axis(predictions, subject_names, subject_idx_grid, t_grid,
                     plasma_df, title, output_path, ylabel="model units",
-                    t_max=21.0, injection_times=None):
+                    t_max=15.0):
     """Shared helper for y1 plots with plasma overlay on secondary y-axis."""
     n_subjects = len(subject_names)
     n_cols = 3
@@ -111,11 +104,8 @@ def _plot_dual_axis(predictions, subject_names, subject_idx_grid, t_grid,
 
         ax.plot(t_subj, mean_pred, color="black", linewidth=1.5, zorder=3, label="Model mean")
         ax.fill_between(t_subj, hdi_low, hdi_high, color="grey", alpha=0.3, zorder=1, label="94% HDI")
-        if injection_times is not None:
-            ax.axvline(injection_times[i], color="green", linestyle="--", linewidth=1,
-                       zorder=4, label="Injection time" if i == 0 else None)
         ax.set_title(subj_name)
-        ax.set_xlim(-0.5, t_max)
+        ax.set_xlim(0, t_max)
 
         # Real plasma data on secondary y-axis
         subj_plasma = plasma_df[plasma_df["subject"] == subj_name]
@@ -142,7 +132,7 @@ def _plot_dual_axis(predictions, subject_names, subject_idx_grid, t_grid,
 
     for ax in axes[n_cols * (n_rows - 1):n_cols * n_rows]:
         if ax.get_visible():
-            ax.set_xlabel("Fake time (min)")
+            ax.set_xlabel("Time since injection (min)")
     for r in range(n_rows):
         axes[r * n_cols].set_ylabel(ylabel)
 
@@ -153,28 +143,76 @@ def _plot_dual_axis(predictions, subject_names, subject_idx_grid, t_grid,
     print(f"Saved plot to {output_path}")
 
 
+def _plot_y1_ngml(predictions, subject_names, subject_idx_grid, t_grid,
+                  plasma_df, title, output_path, t_max=15.0):
+    """Plot y1 model predictions and plasma data on same axis (ng/mL)."""
+    n_subjects = len(subject_names)
+    n_cols = 3
+    n_rows = 4
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 12), sharex=True)
+    axes = axes.flatten()
+
+    for i, subj_name in enumerate(subject_names):
+        ax = axes[i]
+
+        mask_grid = subject_idx_grid == i
+        t_subj = t_grid[mask_grid]
+        preds_subj = predictions[:, mask_grid]
+
+        mean_pred = preds_subj.mean(axis=0)
+        hdi_bounds = az.hdi(preds_subj, hdi_prob=0.94)
+        hdi_low = hdi_bounds[:, 0]
+        hdi_high = hdi_bounds[:, 1]
+
+        ax.plot(t_subj, mean_pred, color="black", linewidth=1.5, zorder=3, label="Model mean")
+        ax.fill_between(t_subj, hdi_low, hdi_high, color="grey", alpha=0.3, zorder=1, label="94% HDI")
+
+        # Plasma data on same axis
+        subj_plasma = plasma_df[plasma_df["subject"] == subj_name]
+        if not subj_plasma.empty:
+            ax.scatter(subj_plasma["time_min"], subj_plasma["plasma_conc"],
+                       s=30, color="red", marker="x", zorder=4, label="Plasma observed")
+
+        ax.set_title(subj_name)
+        ax.set_xlim(0, t_max)
+
+        if i == 0:
+            ax.legend(fontsize=6, loc="upper right")
+
+    for j in range(n_subjects, len(axes)):
+        axes[j].set_visible(False)
+
+    for ax in axes[n_cols * (n_rows - 1):n_cols * n_rows]:
+        if ax.get_visible():
+            ax.set_xlabel("Time since injection (min)")
+    for r in range(n_rows):
+        axes[r * n_cols].set_ylabel("Plasma DMT (ng/mL)")
+
+    fig.suptitle(title, fontsize=14, y=0.98)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved plot to {output_path}")
+
+
 def _load_plasma_df():
-    """Load and filter plasma DMT data for plotting, with injection-time offset."""
+    """Load and filter plasma DMT data for plotting (t=0 = injection)."""
     base = Path(__file__).resolve().parents[2]
     plasma_df = pd.read_csv(base / "data" / "plasma_clean.csv")
     plasma_df = plasma_df[plasma_df["condition"] == "dmt"]
-
-    # Shift plasma times by each subject's injection offset (same as prepare_data)
-    offsets_df = pd.read_csv(base / "results" / "lzc" / "injection_offsets.csv")
-    offset_map = offsets_df.set_index("subject")["injection_time_min"]
-    plasma_df["time_min"] = plasma_df["time_min"] + plasma_df["subject"].map(offset_map)
-
+    # time_min is already relative to injection (t=0 = injection)
     return plasma_df
 
 
 def plot_predictions_y1(trace, data, output_path_curve, output_path_predictive,
-                        t_max=21.0, n_grid=200):
+                        t_max=15.0, n_grid=200):
     """Generate two y1 plots: posterior curves and posterior predictive (with noise)."""
     subject_names = data["subject_names"]
     n_subjects = len(subject_names)
     plasma_df = _load_plasma_df()
+    scale = data.get("plasma_max_ngml", 1.0)
 
-    t_fine = np.linspace(0.01, t_max, n_grid)
+    t_fine = np.linspace(0, t_max, n_grid)
     t_grid = np.tile(t_fine, n_subjects)
     subject_idx_grid = np.repeat(np.arange(n_subjects), n_grid)
 
@@ -182,22 +220,19 @@ def plot_predictions_y1(trace, data, output_path_curve, output_path_predictive,
         trace, t_grid, subject_idx_grid, n_subjects
     )
 
-    injection_times = data.get("injection_times")
+    # Scale model predictions back to ng/mL
+    curve_ngml = curve_samples * scale
+    predictive_ngml = predictive_samples * scale
 
-    _plot_dual_axis(curve_samples, subject_names, subject_idx_grid, t_grid, plasma_df,
-                    "Plasma DMT (y1) — Posterior Curves", output_path_curve,
-                    ylabel="y1 (model units)", t_max=t_max,
-                    injection_times=injection_times)
+    _plot_y1_ngml(curve_ngml, subject_names, subject_idx_grid, t_grid, plasma_df,
+                  "Plasma DMT (y1) — Posterior Curves", output_path_curve, t_max=t_max)
 
-    _plot_dual_axis(predictive_samples, subject_names, subject_idx_grid, t_grid, plasma_df,
-                    "Plasma DMT (y1) — Posterior Predictive", output_path_predictive,
-                    ylabel="y1 (model units)", t_max=t_max,
-                    injection_times=injection_times)
+    _plot_y1_ngml(predictive_ngml, subject_names, subject_idx_grid, t_grid, plasma_df,
+                  "Plasma DMT (y1) — Posterior Predictive", output_path_predictive, t_max=t_max)
 
 
 def _plot_y2(predictions, subject_names, subject_idx_grid, t_grid,
-             data, plasma_df, title, output_path, t_max=21.0,
-             injection_times=None):
+             data, plasma_df, title, output_path, t_max=15.0):
     """Helper for y2 plots: primary = model predictions, secondary = observed LZc scale,
     plus red DMT plasma points (no axis)."""
     n_subjects = len(subject_names)
@@ -222,11 +257,8 @@ def _plot_y2(predictions, subject_names, subject_idx_grid, t_grid,
 
         ax.plot(t_subj, mean_pred, color="black", linewidth=1.5, zorder=3, label="Model mean")
         ax.fill_between(t_subj, hdi_low, hdi_high, color="grey", alpha=0.3, zorder=1, label="94% HDI")
-        if injection_times is not None:
-            ax.axvline(injection_times[i], color="green", linestyle="--", linewidth=1,
-                       zorder=4, label="Injection time" if i == 0 else None)
         ax.set_title(subj_name)
-        ax.set_xlim(-0.5, t_max)
+        ax.set_xlim(0, t_max)
 
         # Observed LZc on secondary y-axis
         mask_obs = data["subject_idx"] == i
@@ -266,7 +298,7 @@ def _plot_y2(predictions, subject_names, subject_idx_grid, t_grid,
 
     for ax in axes[n_cols * (n_rows - 1):n_cols * n_rows]:
         if ax.get_visible():
-            ax.set_xlabel("Fake time (min)")
+            ax.set_xlabel("Time since injection (min)")
     for r in range(n_rows):
         axes[r * n_cols].set_ylabel("y2 (model units)")
         right_idx = r * n_cols + n_cols - 1
@@ -281,13 +313,13 @@ def _plot_y2(predictions, subject_names, subject_idx_grid, t_grid,
 
 
 def plot_predictions_y2(trace, data, output_path_curve, output_path_predictive,
-                        t_max=21.0, n_grid=200):
+                        t_max=15.0, n_grid=200):
     """Generate two y2 plots: posterior curves and posterior predictive (with noise)."""
     subject_names = data["subject_names"]
     n_subjects = len(subject_names)
     plasma_df = _load_plasma_df()
 
-    t_fine = np.linspace(0.01, t_max, n_grid)
+    t_fine = np.linspace(0, t_max, n_grid)
     t_grid = np.tile(t_fine, n_subjects)
     subject_idx_grid = np.repeat(np.arange(n_subjects), n_grid)
 
@@ -295,12 +327,10 @@ def plot_predictions_y2(trace, data, output_path_curve, output_path_predictive,
         trace, t_grid, subject_idx_grid, n_subjects
     )
 
-    injection_times = data.get("injection_times")
-
     _plot_y2(curve_samples, subject_names, subject_idx_grid, t_grid,
              data, plasma_df, "Brain LZc (y2) — Posterior Curves",
-             output_path_curve, t_max, injection_times=injection_times)
+             output_path_curve, t_max)
 
     _plot_y2(predictive_samples, subject_names, subject_idx_grid, t_grid,
              data, plasma_df, "Brain LZc (y2) — Posterior Predictive",
-             output_path_predictive, t_max, injection_times=injection_times)
+             output_path_predictive, t_max)

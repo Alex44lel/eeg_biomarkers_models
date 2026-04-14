@@ -1,11 +1,12 @@
 import numpy as np
 import pymc as pm
 import pytensor.tensor as pt
+import arviz as az
 
 
 def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None,
                 observe_lzc=True):
-    """Build the PyMC partial pooling two-compartment model with Hill equation.
+    """Build the PyMC partial pooling two-compartment model.
 
     Args:
         plasma_data: optional dict with keys 'plasma_t', 'plasma_conc',
@@ -47,35 +48,29 @@ def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None,
         alpha_obs = alpha[subj_idx]
         beta_obs = beta[subj_idx]
 
-        # t_data is already time-since-injection (t=0 at injection)
         t_eff = t_data
 
         # eq 16: plasma compartment (computed at LZc time points)
         y1 = (y_init_obs / (beta_obs - alpha_obs)
-              * ((k2_obs - alpha_obs) * pt.exp(-alpha_obs * t_eff)
-                 - (k2_obs - beta_obs) * pt.exp(-beta_obs * t_eff)))
+              * ((k2_obs - alpha_obs) * pt.exp(-alpha_obs * t_eff) - (k2_obs - beta_obs) * pt.exp(-beta_obs * t_eff)))
         # Brain compartment analytical solution (eq. 17)
+        # No baseline shift needed — data is already baseline-normalized
+
         y2 = (
             k1_obs * y_init_obs / (beta_obs - alpha_obs)
-            * (pt.exp(-alpha_obs * t_eff) - pt.exp(-beta_obs * t_eff))
+            * (pt.exp(-alpha_obs * t_eff) - pt.exp(-beta_obs * t_eff))  # type: ignore
         )
-
-        # Hill tissue response equation: E/E_max = [A]^n / (EC50^n + [A]^n)
-        # E_max = 1, E = lz, [A] = y2
-        EC50 = pm.HalfCauchy("EC50", beta=1.0)
-        n_hill = pm.HalfNormal("n_hill", sigma=2.0)
-        y2_safe = pt.maximum(y2, 0.0)
-        lz_predicted = y2_safe**n_hill / (EC50**n_hill + y2_safe**n_hill)
 
         # Observation noise
         lz_sigma = pm.HalfCauchy("lz_sigma", beta=1.0)
         plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=1.0)
 
-        # Likelihood — brain (LZc) via Hill equation
+        # Likelihood — brain (LZc)
+        # lo paso por una ecuación de hill
         if observe_lzc:
-            pm.Normal("lz_obs", mu=lz_predicted, sigma=lz_sigma, observed=lzc)
+            pm.Normal("lz_obs", mu=y2, sigma=lz_sigma, observed=lzc)
         else:
-            pm.Normal("lz_obs", mu=lz_predicted, sigma=lz_sigma)
+            pm.Normal("lz_obs", mu=y2, sigma=lz_sigma)
 
         # Likelihood — plasma
         if plasma_data is not None:
@@ -108,33 +103,11 @@ def fit_model(model, draws=2000, chains=2):
     return trace
 
 
-def _apply_hill(y2_samples, trace, ndim):
-    """Apply Hill equation to y2 samples if parameters exist in trace."""
-    if "EC50" not in trace.posterior or "n_hill" not in trace.posterior:
-        return y2_samples
-
-    EC50 = trace.posterior["EC50"].values.reshape(-1)
-    n_hill = trace.posterior["n_hill"].values.reshape(-1)
-    y2_safe = np.maximum(y2_samples, 0.0)
-
-    if ndim == 3:
-        EC50_exp = EC50[:, np.newaxis, np.newaxis]
-        n_exp = n_hill[:, np.newaxis, np.newaxis]
-    else:
-        EC50_exp = EC50[:, np.newaxis]
-        n_exp = n_hill[:, np.newaxis]
-
-    return y2_safe**n_exp / (EC50_exp**n_exp + y2_safe**n_exp)
-
-
 def compute_posterior_predictive(trace, t_grid, subject_idx_grid, n_subjects):
-    """Compute LZc predictions on a fine time grid from posterior samples.
-
-    When the trace contains Hill equation parameters (EC50, n_hill), the
-    raw y2 (brain concentration) is transformed through the Hill equation.
+    """Compute y2 predictions on a fine time grid from posterior samples.
 
     Returns:
-        (posterior_curve_samples, posterior_predictive_samples)
+        (posterior_curve_samples, posterior_predictive_samples) — curve without noise, and with observation noise.
     """
     # Extract posterior samples
     k0 = trace.posterior["k0"].values.reshape(-1, n_subjects)
@@ -159,7 +132,6 @@ def compute_posterior_predictive(trace, t_grid, subject_idx_grid, n_subjects):
 
     # Handle broadcasting
     if len(subj) != len(t_grid):
-        ndim = 3
         alpha_g = alpha_g[:, :, np.newaxis]
         beta_g = beta_g[:, :, np.newaxis]
         k1_g = k1_g[:, :, np.newaxis]
@@ -167,7 +139,6 @@ def compute_posterior_predictive(trace, t_grid, subject_idx_grid, n_subjects):
         t_g = t_grid[np.newaxis, np.newaxis, :]
         lz_sigma_expanded = lz_sigma[:, np.newaxis, np.newaxis]
     else:
-        ndim = 2
         t_g = t_grid[np.newaxis, :]
         lz_sigma_expanded = lz_sigma[:, np.newaxis]
 
@@ -175,9 +146,6 @@ def compute_posterior_predictive(trace, t_grid, subject_idx_grid, n_subjects):
         k1_g * y_init_g / (beta_g - alpha_g)
         * (np.exp(-alpha_g * t_g) - np.exp(-beta_g * t_g))
     )
-
-    # Apply Hill equation if parameters exist
-    posterior_curve_samples = _apply_hill(posterior_curve_samples, trace, ndim)
 
     posterior_predictive_samples = np.random.normal(
         loc=posterior_curve_samples, scale=lz_sigma_expanded
@@ -190,7 +158,7 @@ def compute_posterior_predictive_y1(trace, t_grid, subject_idx_grid, n_subjects)
     """Compute y1 (plasma/DMT) predictions on a fine time grid from posterior samples.
 
     Returns:
-        (posterior_curve_samples, posterior_predictive_samples)
+        (posterior_curve_samples, posterior_predictive_samples) — curve without noise, and with observation noise.
     """
     k0 = trace.posterior["k0"].values.reshape(-1, n_subjects)
     k1 = trace.posterior["k1"].values.reshape(-1, n_subjects)
