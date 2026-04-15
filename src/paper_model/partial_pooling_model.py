@@ -24,7 +24,7 @@ def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None,
         k0_sigma = pm.Exponential("k0_sigma", lam=1.0)
         k1_sigma = pm.Exponential("k1_sigma", lam=1.0)
         k2_sigma = pm.Exponential("k2_sigma", lam=1.0)
-        y_init_sigma = pm.Exponential("y_init_sigma", lam=1.0)
+        y_init_sigma = pm.Exponential("y_init_sigma", lam=0.002)
 
         # Per-subject rate parameters
         k0 = pm.HalfCauchy("k0", beta=k0_sigma, shape=n_subjects)
@@ -62,14 +62,14 @@ def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None,
 
         # Hill tissue response equation: E/E_max = [A]^n / (EC50^n + [A]^n)
         # E_max = 1, E = lz, [A] = y2
-        EC50 = pm.HalfCauchy("EC50", beta=1.0)
-        n_hill = pm.HalfNormal("n_hill", sigma=2.0)
+        EC50 = pm.LogNormal("EC50", mu=np.log(100.0), sigma=1.0)
+        n_hill = pm.LogNormal("n_hill", mu=0, sigma=0.5)
         y2_safe = pt.maximum(y2, 0.0)
         lz_predicted = y2_safe**n_hill / (EC50**n_hill + y2_safe**n_hill)
 
         # Observation noise
         lz_sigma = pm.HalfCauchy("lz_sigma", beta=1.0)
-        plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=1.0)
+        plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=50.0)
 
         # Likelihood — brain (LZc) via Hill equation
         if observe_lzc:
@@ -93,9 +93,7 @@ def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None,
                 * ((k2_p - alpha_p) * pt.exp(-alpha_p * plasma_t_data)
                    - (k2_p - beta_p) * pt.exp(-beta_p * plasma_t_data))
             )
-            # plasma_scale converts model units to ng/mL
-            plasma_scale = pm.HalfNormal("plasma_scale", sigma=500)
-            pm.Normal("plasma_obs", mu=y1_plasma * plasma_scale,
+            pm.Normal("plasma_obs", mu=y1_plasma,
                       sigma=plasma_sigma,
                       observed=plasma_data["plasma_conc"])
         else:
@@ -107,7 +105,8 @@ def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None,
 def fit_model(model, draws=2000, chains=2):
     """Run MCMC and return InferenceData."""
     with model:
-        trace = pm.sample(tune=2000, draws=draws, chains=chains, target_accept=0.9, cores=2, return_inferencedata=True)
+        trace = pm.sample(tune=1000, draws=draws, chains=chains, target_accept=0.95,
+                          cores=chains, return_inferencedata=True)
     return trace
 
 

@@ -12,8 +12,8 @@ import arviz as az
 
 from .prepare_data import load_and_prepare, load_plasma_data
 from .partial_pooling_model import build_model, fit_model
-from .plot_predictions import plot_predictions_y1, plot_predictions_y2
-from .plot_parameters import plot_parameters
+from .plot_predictions import plot_predictions_y1, plot_predictions_y2, plot_predictions_lzc
+from .plot_parameters import plot_parameters, plot_parameter_table
 
 RESULTS_DIR = Path(__file__).resolve().parents[2] / "results" / "paper_model"
 
@@ -84,9 +84,21 @@ def main():
         RESULTS_DIR / "partial_pooling_y2_predictive.png",
     )
 
+    # Step 3c: Plot predicted LZc vs observed
+    print("Generating LZc prediction plots...")
+    plot_predictions_lzc(
+        trace, data,
+        RESULTS_DIR / "partial_pooling_lzc_curves.png",
+        RESULTS_DIR / "partial_pooling_lzc_predictive.png",
+    )
+
     # Step 4: Plot parameters (Figure 27)
     print("Generating parameters plot...")
     plot_parameters(trace, data, RESULTS_DIR / "partial_pooling_parameters.png")
+
+    # Step 5: Parameter summary table
+    print("Generating parameter summary table...")
+    plot_parameter_table(trace, data, RESULTS_DIR / "partial_pooling_param_table.png")
 
     print("Done!")
 

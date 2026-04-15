@@ -4,7 +4,7 @@ from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 RESULTS_DIR = Path(__file__).resolve().parents[2] / "results"
-EXCLUDED_SUBJECTS = ["S03", "S04", "S09", "S11"]
+EXCLUDED_SUBJECTS = ["S03", "S04", "S08", "S09", "S11"]
 
 
 def load_and_prepare(exclude_subjects=None):

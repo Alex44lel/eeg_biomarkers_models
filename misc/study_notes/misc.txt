@@ -103,3 +103,20 @@ drug concentration in the brain doesn't translate 1:1 into a brain complexity ch
   concentration to an effect.
 
 
+
+-------------------
+
+EEG data was then collected from one minute prior to drug administration and placebo up to 20 minutes after = False
+
+Blood samples of 10 ml were collected in EDTA tubes prior to and at approximately 2, 5, 12, 20, 33 and 60 minutes after DMT administration. =>
+=> asumo que el sample en t=0 es pre-injection, asumo también que ese t=0 se corresponde aprox con el grupo después del parón (linea verde de los plots) (realmente pienso que sería un pelin antes)
+
+
+Spectral and spontaneous signal diversity analysis were performed for 5 minutes-averaged data before and immediately after DMT/Placebo administration (time-averaged results). Additionally, we performed analysis using 1 minute averages throughout the whole 20 minutes of EEG recordings following DMT/Placebo injection (time-sensitive results). =>
+=> esto confirma un poco mi teoria
+
+si comparo los plots tiene sentido
+
+
+- i fit he model as you told me
+- calculate lz values only post injection without normalizing, i made sure they were between [0 and 1]
