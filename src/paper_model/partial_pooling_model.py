@@ -24,7 +24,7 @@ def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None,
         k0_sigma = pm.Exponential("k0_sigma", lam=1.0)
         k1_sigma = pm.Exponential("k1_sigma", lam=1.0)
         k2_sigma = pm.Exponential("k2_sigma", lam=1.0)
-        y_init_sigma = pm.Exponential("y_init_sigma", lam=0.002)
+        y_init_sigma = pm.Exponential("y_init_sigma", lam=0.002)  # 500 mean 1/lam
 
         # Per-subject rate parameters
         k0 = pm.HalfCauchy("k0", beta=k0_sigma, shape=n_subjects)
@@ -69,6 +69,7 @@ def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None,
 
         # Observation noise
         lz_sigma = pm.HalfCauchy("lz_sigma", beta=1.0)
+        # prior 95% interval is roughly [0, 636] ng/mL, median 50 ng/ml
         plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=50.0)
 
         # Likelihood — brain (LZc) via Hill equation

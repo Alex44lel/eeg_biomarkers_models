@@ -1,9 +1,11 @@
 """
-Training script for graphTrip EEG classifier.
+Training script for graphTrip EEG DMT plasma regression.
+
+Predicts plasma DMT concentration (ng/mL) from 3-second EEG trials
+using a graph neural network with VGAE reconstruction loss.
 
 Usage:
-    python train_eeg.py --val_subjects S12 S13 --lr 1e-3 --batch_size 16 --epochs 100 \
-        --patience 15 --dropout 0.1 --use_coords --cls_weight 1.0
+    python train_eeg.py --val_subjects S12 S13 --lr 1e-3 --batch_size 16 --epochs 100
 """
 
 import argparse
@@ -15,7 +17,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch_geometric.loader import DataLoader
-from sklearn.metrics import confusion_matrix
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 
@@ -29,7 +30,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Train graphTrip EEG classifier")
+    p = argparse.ArgumentParser(description="Train graphTrip EEG DMT regression")
     p.add_argument("--val_subjects", nargs="+", default=["S12", "S13"])
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--batch_size", type=int, default=16)
@@ -39,65 +40,55 @@ def parse_args():
     p.add_argument("--weight_decay", type=float, default=1e-4)
     p.add_argument("--use_coords", action="store_true",
                     help="Use electrode 10-10 coordinates as conditional node features")
-    p.add_argument("--cls_weight", type=float, default=1.0,
-                    help="Weight for classification loss relative to VGAE loss")
+    p.add_argument("--task_weight", type=float, default=1.0,
+                    help="Weight for regression loss relative to VGAE loss")
     p.add_argument("--hidden_dim", type=int, default=32)
     p.add_argument("--latent_dim", type=int, default=32)
     p.add_argument("--num_layers", type=int, default=3)
     p.add_argument("--num_heads", type=int, default=4)
-    p.add_argument("--experiment_name", type=str, default="graphTrip_EEG")
+    p.add_argument("--experiment_name", type=str, default="graphTrip_DMT_regression")
     p.add_argument("--run_name", type=str, default=None)
     return p.parse_args()
 
 
-def compute_metrics(y_true, y_pred):
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
-    npv = tn / (tn + fn) if (tn + fn) > 0 else 0.0
-    accuracy = (tp + tn) / (tp + tn + fp + fn)
-    return {
-        "accuracy": accuracy,
-        "precision": precision,
-        "recall": recall,
-        "specificity": specificity,
-        "npv": npv,
-        "tp": tp, "tn": tn, "fp": fp, "fn": fn,
-    }
+def compute_regression_metrics(y_true, y_pred):
+    """Compute MAE, RMSE, R² for regression."""
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    mae = np.mean(np.abs(y_true - y_pred))
+    mse = np.mean((y_true - y_pred) ** 2)
+    rmse = np.sqrt(mse)
+    ss_res = np.sum((y_true - y_pred) ** 2)
+    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    return {"mae": mae, "rmse": rmse, "mse": mse, "r2": r2}
 
 
-def plot_confusion_matrix(metrics, val_subjects):
-    tp, tn, fp, fn = metrics["tp"], metrics["tn"], metrics["fp"], metrics["fn"]
-    cm = np.array([[tn, fp], [fn, tp]])
-    acc = metrics["accuracy"]
+def plot_predicted_vs_actual(y_true, y_pred, val_subjects, metrics):
+    """Scatter plot of predicted vs actual plasma concentration."""
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.scatter(y_true, y_pred, alpha=0.5, s=15, c="steelblue")
 
-    fig, ax = plt.subplots(figsize=(5, 4))
-    im = ax.imshow(cm, cmap="Blues")
-    ax.set_xticks([0, 1])
-    ax.set_yticks([0, 1])
-    ax.set_xticklabels(["Pre (0)", "Post (1)"])
-    ax.set_yticklabels(["Pre (0)", "Post (1)"])
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("Actual")
-    ax.set_title(f"Val subjects: {','.join(val_subjects)}\nVal accuracy: {acc:.4f}")
+    # Identity line
+    lims = [min(min(y_true), min(y_pred)), max(max(y_true), max(y_pred))]
+    ax.plot(lims, lims, "k--", linewidth=1, label="Perfect prediction")
 
-    for i in range(2):
-        for j in range(2):
-            color = "white" if cm[i, j] > cm.max() / 2 else "black"
-            ax.text(j, i, str(cm[i, j]), ha="center", va="center", color=color, fontsize=16)
-
-    fig.colorbar(im)
+    ax.set_xlabel("Actual plasma DMT (ng/mL)")
+    ax.set_ylabel("Predicted plasma DMT (ng/mL)")
+    ax.set_title(f"Val subjects: {','.join(val_subjects)}\n"
+                 f"MAE={metrics['mae']:.1f}  RMSE={metrics['rmse']:.1f}  R²={metrics['r2']:.3f}")
+    ax.legend()
     plt.tight_layout()
 
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         fig.savefig(f.name, dpi=150)
-        mlflow.log_artifact(f.name, "confusion_matrix")
+        mlflow.log_artifact(f.name, "predicted_vs_actual")
     plt.close(fig)
 
 
 @torch.no_grad()
 def plot_latent_space(model, train_loader, val_loader, val_subjects, device):
+    """t-SNE of graph-level latent features, colored by plasma concentration."""
     model.eval()
 
     all_feats, all_labels, all_splits = [], [], []
@@ -118,24 +109,25 @@ def plot_latent_space(model, train_loader, val_loader, val_subjects, device):
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
-    for lbl, name, color in [(0, "Pre-inj", "tab:blue"), (1, "Post-inj", "tab:red")]:
-        mask = all_labels == lbl
-        axes[0].scatter(proj[mask, 0], proj[mask, 1], c=color, label=name, alpha=0.5, s=10)
-    axes[0].set_title("All data - by class")
-    axes[0].legend()
+    # Color by concentration
+    sc = axes[0].scatter(proj[:, 0], proj[:, 1], c=all_labels, cmap="viridis",
+                         alpha=0.5, s=10)
+    axes[0].set_title("All data - by concentration (ng/mL)")
+    fig.colorbar(sc, ax=axes[0], label="ng/mL")
 
+    # Color by split
     for split, color in [("train", "tab:gray"), ("val", "tab:orange")]:
         mask = all_splits == split
         axes[1].scatter(proj[mask, 0], proj[mask, 1], c=color, label=split, alpha=0.5, s=10)
     axes[1].set_title("All data - by split")
     axes[1].legend()
 
+    # Val only, colored by concentration
     val_mask = all_splits == "val"
-    for lbl, name, color in [(0, "Pre-inj", "tab:blue"), (1, "Post-inj", "tab:red")]:
-        mask = val_mask & (all_labels == lbl)
-        axes[2].scatter(proj[mask, 0], proj[mask, 1], c=color, label=name, alpha=0.6, s=15)
-    axes[2].set_title(f"Val only ({','.join(val_subjects)}) - by class")
-    axes[2].legend()
+    sc2 = axes[2].scatter(proj[val_mask, 0], proj[val_mask, 1],
+                          c=all_labels[val_mask], cmap="viridis", alpha=0.6, s=15)
+    axes[2].set_title(f"Val only ({','.join(val_subjects)}) - by concentration")
+    fig.colorbar(sc2, ax=axes[2], label="ng/mL")
 
     for ax in axes:
         ax.set_xlabel("t-SNE 1")
@@ -151,10 +143,10 @@ def plot_latent_space(model, train_loader, val_loader, val_subjects, device):
     print("Saved latent space plot to MLflow artifacts.")
 
 
-def train_one_epoch(model, loader, criterion, optimizer, device, cls_weight):
+def train_one_epoch(model, loader, criterion, optimizer, device, task_weight):
     model.train()
     total_loss = 0.0
-    total_cls_loss = 0.0
+    total_task_loss = 0.0
     total_vgae_loss = 0.0
     all_preds, all_labels = [], []
     n_samples = 0
@@ -163,60 +155,58 @@ def train_one_epoch(model, loader, criterion, optimizer, device, cls_weight):
         batch = batch.to(device)
         optimizer.zero_grad()
 
-        logits, vgae_data, _ = model(batch)
-        cls_loss = criterion(logits, batch.y)
+        output, vgae_data, _ = model(batch)
+        task_loss = criterion(output, batch.y)
         vgae_loss = model.vgae_loss(vgae_data)
-        loss = vgae_loss + cls_weight * cls_loss
+        loss = vgae_loss + task_weight * task_loss
 
         loss.backward()
         optimizer.step()
 
         bs = batch.num_graphs
         total_loss += loss.item() * bs
-        total_cls_loss += cls_loss.item() * bs
+        total_task_loss += task_loss.item() * bs
         total_vgae_loss += vgae_loss.item() * bs
         n_samples += bs
 
-        preds = logits.argmax(dim=1)
-        all_preds.append(preds.cpu().numpy())
+        all_preds.append(output.detach().cpu().numpy())
         all_labels.append(batch.y.cpu().numpy())
 
     all_preds = np.concatenate(all_preds)
     all_labels = np.concatenate(all_labels)
-    metrics = compute_metrics(all_labels, all_preds)
-    return total_loss / n_samples, total_cls_loss / n_samples, total_vgae_loss / n_samples, metrics
+    metrics = compute_regression_metrics(all_labels, all_preds)
+    return total_loss / n_samples, total_task_loss / n_samples, total_vgae_loss / n_samples, metrics
 
 
 @torch.no_grad()
-def evaluate(model, loader, criterion, device, cls_weight):
+def evaluate(model, loader, criterion, device, task_weight):
     model.eval()
     total_loss = 0.0
-    total_cls_loss = 0.0
+    total_task_loss = 0.0
     total_vgae_loss = 0.0
     all_preds, all_labels = [], []
     n_samples = 0
 
     for batch in loader:
         batch = batch.to(device)
-        logits, vgae_data, _ = model(batch)
-        cls_loss = criterion(logits, batch.y)
+        output, vgae_data, _ = model(batch)
+        task_loss = criterion(output, batch.y)
         vgae_loss = model.vgae_loss(vgae_data)
-        loss = vgae_loss + cls_weight * cls_loss
+        loss = vgae_loss + task_weight * task_loss
 
         bs = batch.num_graphs
         total_loss += loss.item() * bs
-        total_cls_loss += cls_loss.item() * bs
+        total_task_loss += task_loss.item() * bs
         total_vgae_loss += vgae_loss.item() * bs
         n_samples += bs
 
-        preds = logits.argmax(dim=1)
-        all_preds.append(preds.cpu().numpy())
+        all_preds.append(output.cpu().numpy())
         all_labels.append(batch.y.cpu().numpy())
 
     all_preds = np.concatenate(all_preds)
     all_labels = np.concatenate(all_labels)
-    metrics = compute_metrics(all_labels, all_preds)
-    return total_loss / n_samples, total_cls_loss / n_samples, total_vgae_loss / n_samples, metrics
+    metrics = compute_regression_metrics(all_labels, all_preds)
+    return total_loss / n_samples, total_task_loss / n_samples, total_vgae_loss / n_samples, metrics, all_labels, all_preds
 
 
 def main():
@@ -238,7 +228,7 @@ def main():
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
 
-    # Model
+    # Model (num_classes=1 for regression)
     num_cond_attrs = 3 if args.use_coords else 0
     model = EEGGraphClassifier(
         num_node_attr=5,
@@ -250,10 +240,11 @@ def main():
         num_layers=args.num_layers,
         num_heads=args.num_heads,
         dropout=args.dropout,
+        num_classes=1,
     ).to(device)
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     # MLflow
@@ -262,7 +253,7 @@ def main():
 
     run_name = args.run_name or (
         f"lr{args.lr}_bs{args.batch_size}_do{args.dropout}"
-        f"_cw{args.cls_weight}_{'coords' if args.use_coords else 'nocoords'}"
+        f"_tw{args.task_weight}_{'coords' if args.use_coords else 'nocoords'}"
     )
 
     with mlflow.start_run(run_name=run_name):
@@ -274,7 +265,7 @@ def main():
             "dropout": args.dropout,
             "weight_decay": args.weight_decay,
             "use_coords": args.use_coords,
-            "cls_weight": args.cls_weight,
+            "task_weight": args.task_weight,
             "hidden_dim": args.hidden_dim,
             "latent_dim": args.latent_dim,
             "num_layers": args.num_layers,
@@ -284,6 +275,7 @@ def main():
             "n_train": len(train_ds),
             "n_val": len(val_ds),
             "device": str(device),
+            "task": "regression",
         })
 
         best_val_loss = float("inf")
@@ -293,11 +285,11 @@ def main():
         for epoch in range(1, args.epochs + 1):
             t0 = time.time()
 
-            train_loss, train_cls, train_vgae, train_metrics = train_one_epoch(
-                model, train_loader, criterion, optimizer, device, args.cls_weight
+            train_loss, train_task, train_vgae, train_metrics = train_one_epoch(
+                model, train_loader, criterion, optimizer, device, args.task_weight
             )
-            val_loss, val_cls, val_vgae, val_metrics = evaluate(
-                model, val_loader, criterion, device, args.cls_weight
+            val_loss, val_task, val_vgae, val_metrics, _, _ = evaluate(
+                model, val_loader, criterion, device, args.task_weight
             )
 
             elapsed = time.time() - t0
@@ -305,26 +297,22 @@ def main():
             mlflow.log_metrics({
                 "train_loss": train_loss,
                 "val_loss": val_loss,
-                "train_cls_loss": train_cls,
-                "val_cls_loss": val_cls,
+                "train_task_loss": train_task,
+                "val_task_loss": val_task,
                 "train_vgae_loss": train_vgae,
                 "val_vgae_loss": val_vgae,
-                "train_accuracy": train_metrics["accuracy"],
-                "val_accuracy": val_metrics["accuracy"],
-                "train_precision": train_metrics["precision"],
-                "val_precision": val_metrics["precision"],
-                "train_recall": train_metrics["recall"],
-                "val_recall": val_metrics["recall"],
-                "train_specificity": train_metrics["specificity"],
-                "val_specificity": val_metrics["specificity"],
-                "train_npv": train_metrics["npv"],
-                "val_npv": val_metrics["npv"],
+                "train_mae": train_metrics["mae"],
+                "val_mae": val_metrics["mae"],
+                "train_rmse": train_metrics["rmse"],
+                "val_rmse": val_metrics["rmse"],
+                "train_r2": train_metrics["r2"],
+                "val_r2": val_metrics["r2"],
             }, step=epoch)
 
             print(f"Epoch {epoch:3d}/{args.epochs} | "
                   f"Loss: {train_loss:.4f}/{val_loss:.4f} | "
-                  f"CLS: {train_cls:.4f}/{val_cls:.4f} | "
-                  f"Acc: {train_metrics['accuracy']:.3f}/{val_metrics['accuracy']:.3f} | "
+                  f"MAE: {train_metrics['mae']:.1f}/{val_metrics['mae']:.1f} | "
+                  f"R²: {train_metrics['r2']:.3f}/{val_metrics['r2']:.3f} | "
                   f"{elapsed:.1f}s")
 
             # Early stopping on total val loss
@@ -343,34 +331,24 @@ def main():
             model.load_state_dict(best_model_state)
             model.to(device)
 
-        val_loss, val_cls, val_vgae, val_metrics = evaluate(
-            model, val_loader, criterion, device, args.cls_weight
+        val_loss, val_task, val_vgae, val_metrics, y_true, y_pred = evaluate(
+            model, val_loader, criterion, device, args.task_weight
         )
 
         print(f"\n--- Best model (val_loss={best_val_loss:.4f}) ---")
-        print(f"Val accuracy:    {val_metrics['accuracy']:.4f}")
-        print(f"Val precision:   {val_metrics['precision']:.4f}")
-        print(f"Val recall:      {val_metrics['recall']:.4f}")
-        print(f"Val specificity: {val_metrics['specificity']:.4f}")
-        print(f"Val NPV:         {val_metrics['npv']:.4f}")
-        print(f"Confusion matrix: TP={val_metrics['tp']} TN={val_metrics['tn']} "
-              f"FP={val_metrics['fp']} FN={val_metrics['fn']}")
+        print(f"Val MAE:  {val_metrics['mae']:.1f} ng/mL")
+        print(f"Val RMSE: {val_metrics['rmse']:.1f} ng/mL")
+        print(f"Val R²:   {val_metrics['r2']:.3f}")
 
         mlflow.log_metrics({
             "best_val_loss": best_val_loss,
-            "best_val_accuracy": val_metrics["accuracy"],
-            "best_val_precision": val_metrics["precision"],
-            "best_val_recall": val_metrics["recall"],
-            "best_val_specificity": val_metrics["specificity"],
-            "best_val_npv": val_metrics["npv"],
-            "best_val_tp": val_metrics["tp"],
-            "best_val_tn": val_metrics["tn"],
-            "best_val_fp": val_metrics["fp"],
-            "best_val_fn": val_metrics["fn"],
+            "best_val_mae": val_metrics["mae"],
+            "best_val_rmse": val_metrics["rmse"],
+            "best_val_r2": val_metrics["r2"],
         })
 
-        # Confusion matrix plot
-        plot_confusion_matrix(val_metrics, args.val_subjects)
+        # Predicted vs actual scatter plot
+        plot_predicted_vs_actual(y_true, y_pred, args.val_subjects, val_metrics)
 
         # Latent space t-SNE plot
         plot_latent_space(model, train_loader, val_loader, args.val_subjects, device)

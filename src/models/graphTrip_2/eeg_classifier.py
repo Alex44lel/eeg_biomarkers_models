@@ -1,5 +1,5 @@
 """
-EEG Graph Classifier — wraps graphTrip VGAE components for binary classification.
+EEG Graph Model — wraps graphTrip VGAE components for classification or regression.
 
 Bypasses the NodeLevelVGAE config system and directly instantiates the components
 from model.py. This avoids the broken `models.utils` import chain.
@@ -11,9 +11,9 @@ Architecture:
   4. MLPEdgeDecoder (tanh)    → reconstructed edge values
   5. MLPEdgeDecoder (sigmoid) → edge existence probability
   6. GraphTransformerPooling  → graph-level vector
-  7. Classification head      → 2-class logits
+  7. Output head              → 2-class logits (classification) or 1 scalar (regression)
 
-Loss = VGAE loss (reconstruction + KL) + cls_weight * CrossEntropy
+Loss = VGAE loss (reconstruction + KL) + task_weight * task_loss
 """
 
 import sys
@@ -45,7 +45,9 @@ from model import (
 
 class EEGGraphClassifier(nn.Module):
     """
-    VGAE + classification head for EEG graph data.
+    VGAE + output head for EEG graph data.
+
+    Supports both classification (num_classes=2) and regression (num_classes=1).
 
     Parameters
     ----------
@@ -58,6 +60,7 @@ class EEGGraphClassifier(nn.Module):
     num_layers     : int, number of Graphormer layers
     num_heads      : int, number of attention heads
     dropout        : float
+    num_classes    : int, 2 for classification, 1 for regression
     """
 
     def __init__(
@@ -71,9 +74,11 @@ class EEGGraphClassifier(nn.Module):
         num_layers=3,
         num_heads=4,
         dropout=0.1,
+        num_classes=1,
     ):
         super().__init__()
         self.latent_dim = latent_dim
+        self.num_classes = num_classes
 
         # Graphormer encoder: graph → node embeddings
         self.node_emb_model = NodeEmbeddingGraphormer(
@@ -124,12 +129,12 @@ class EEGGraphClassifier(nn.Module):
             dropout=dropout,
         )
 
-        # Classification head
+        # Output head: 2 for classification, 1 for regression
         self.classifier = nn.Sequential(
             nn.Linear(latent_dim, latent_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(latent_dim, 2),
+            nn.Linear(latent_dim, num_classes),
         )
 
     def reparameterize(self, mu, logvar):
@@ -169,8 +174,10 @@ class EEGGraphClassifier(nn.Module):
         # Pool → graph-level vector
         graph_feats = self.pooling(z, batch.batch)    # (B, latent_dim)
 
-        # Classify
-        logits = self.classifier(graph_feats)         # (B, 2)
+        # Output head
+        output = self.classifier(graph_feats)         # (B, num_classes)
+        if self.num_classes == 1:
+            output = output.squeeze(-1)               # (B,) for regression
 
         vgae_data = {
             "x": x_orig,
@@ -181,7 +188,7 @@ class EEGGraphClassifier(nn.Module):
             "logvar": logvar,
         }
 
-        return logits, vgae_data, graph_feats
+        return output, vgae_data, graph_feats
 
     def vgae_loss(self, vgae_data):
         """Reconstruction + KL divergence loss."""

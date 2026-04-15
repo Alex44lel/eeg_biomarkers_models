@@ -1,12 +1,13 @@
 """
-PyG dataset for EEG DMT classification using graph representation.
+PyG dataset for EEG DMT regression using graph representation.
 
 Each 3-second EEG trial becomes a graph:
-  - Nodes = EEG channels (32 after excluding non-EEG)
+  - Nodes = EEG channels (32)
   - Node features = spectral band powers (5 bands)
   - Edge features = amplitude envelope correlation (AEC)
   - SPD = all 1s (fully connected graph)
   - Conditional features = electrode 10-10 coordinates (optional)
+  - Label = plasma DMT concentration (ng/mL) from PK model
 
 Caches per-subject .pt files. Multi-subject datasets load and concatenate
 individual subject caches — no duplication.
@@ -20,11 +21,8 @@ from pathlib import Path
 from eeg_features import compute_band_powers, compute_aec, get_electrode_coords
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "eeg_dmt_dataset.npz"
-CACHE_ROOT = PROJECT_ROOT / "data" / "processed_graphs"
-
-# Non-EEG channel indices to exclude (ECG=31, VEOG=32, EMGfront=33, EMGtemp=34)
-NON_EEG_INDICES = [31, 32, 33, 34]
+DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "eeg_dmt_regression.npz"
+CACHE_ROOT = PROJECT_ROOT / "data" / "processed_graphs_regression"
 
 
 def _build_fully_connected_edge_index(n_nodes):
@@ -58,20 +56,15 @@ def _process_subject(subject, use_coords, data_path=None):
         return torch.load(cache_path, weights_only=False)
 
     ds = np.load(data_path, allow_pickle=True)
-    all_eeg = ds["eeg"]
+    all_eeg = ds["eeg_data"]
     all_subjects = ds["subjects"]
     all_labels = ds["labels"]
     channel_labels = list(ds["channel_labels"])
 
     # Filter to this subject
     mask = all_subjects == subject
-    subj_eeg = all_eeg[mask]
-    subj_labels = all_labels[mask]
-
-    # Exclude non-EEG channels
-    keep_ch = [i for i in range(subj_eeg.shape[1]) if i not in NON_EEG_INDICES]
-    subj_eeg = subj_eeg[:, keep_ch, :]
-    eeg_channel_labels = [channel_labels[i] for i in keep_ch]
+    subj_eeg = all_eeg[mask]       # (N_trials, 32, 3000)
+    subj_labels = all_labels[mask]  # (N_trials,) ng/mL
 
     n_nodes = subj_eeg.shape[1]  # 32
 
@@ -81,7 +74,7 @@ def _process_subject(subject, use_coords, data_path=None):
 
     # Electrode coordinates
     if use_coords:
-        coords = torch.from_numpy(get_electrode_coords(eeg_channel_labels))
+        coords = torch.from_numpy(get_electrode_coords(channel_labels))
     else:
         coords = torch.zeros(n_nodes, 0)
 
@@ -102,7 +95,7 @@ def _process_subject(subject, use_coords, data_path=None):
             edge_index=edge_index,
             edge_attr=edge_attr,
             spd=spd,
-            y=torch.tensor(subj_labels[i], dtype=torch.long),
+            y=torch.tensor(subj_labels[i], dtype=torch.float),
         )
         data_list.append(data)
 
@@ -116,10 +109,10 @@ def _process_subject(subject, use_coords, data_path=None):
 
 class EEGGraphDataset(InMemoryDataset):
     """
-    PyG InMemoryDataset for EEG graph classification.
+    PyG InMemoryDataset for EEG DMT plasma regression.
 
-    Caches are stored per-subject, so a train set of 8 subjects just loads
-    8 individual .pt files — no duplication across different split combinations.
+    Caches are stored per-subject, so a train set of 6 subjects just loads
+    6 individual .pt files — no duplication across different split combinations.
 
     Parameters
     ----------
@@ -163,14 +156,14 @@ class EEGGraphDataset(InMemoryDataset):
 def get_subject_split(val_subjects, all_subjects=None):
     """Return (train_subjects, val_subjects) ensuring no overlap."""
     if all_subjects is None:
-        all_subjects = ["S01", "S02", "S04", "S05", "S06", "S07", "S08", "S10", "S12", "S13"]
+        all_subjects = ["S01", "S02", "S05", "S06", "S07", "S10", "S12", "S13"]
     train_subjects = [s for s in all_subjects if s not in val_subjects]
     return train_subjects, val_subjects
 
 
 def precompute_all(data_path=None):
     """Precompute caches for all subjects, both with and without coords."""
-    all_subjects = ["S01", "S02", "S04", "S05", "S06", "S07", "S08", "S10", "S12", "S13"]
+    all_subjects = ["S01", "S02", "S05", "S06", "S07", "S10", "S12", "S13"]
     for use_coords in [False, True]:
         tag = "coords" if use_coords else "nocoords"
         print(f"\n=== {tag} ===")

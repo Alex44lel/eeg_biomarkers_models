@@ -120,3 +120,60 @@ si comparo los plots tiene sentido
 
 - i fit he model as you told me
 - calculate lz values only post injection without normalizing, i made sure they were between [0 and 1]
+
+- lognormal distribution means the log of the variable is normally distributed
+EC50 = pm.LogNormal("EC50", mu=np.log(100.0), sigma=1.0)
+n_hill = pm.LogNormal("n_hill", mu=0, sigma=0.5)
+
+- EC50 is the brain DMT concentration (in ng/mL) at which LZc reaches 50% of its maximum. 
+  -mu=log(100) centers the prior on 100 ng/mL
+  -sigma=1.0 gives a 95% prior interval of roughly [14, 710] ng/mL, wide enough to be learned from data
+  -we use lognormal to avoid it degenerating to creo
+
+-The Hill coefficient controls the steepness of the dose-response curve.
+  - mu=0 centers prior on 1
+  - sigma=0.5 gives a 95% prior interval of [0.4, 2.7]
+
+- y_init_sigma ~ Exponential(lam=0.002) (mean 500)
+- si no se usa este init la escala no cuadra   
+
+plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=50.0)  # prior 95% interval is roughly [0, 636] ng/mL, median 50 ng/ml
+
+
+
+
+- R2 suggest no learning, but MAE decreases
+- The wider the range the bigger the mae
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+- surrogate lz calculation approach:
+Surrogate normalization (Casali et al. 2013) takes a different approach: shuffle the binary sequence randomly to destroy all temporal structure, then compute LZ76 on that shuffled version. The shuffled sequence has the maximum possible complexity for a sequence with that same proportion of 0s and 1s. Dividing by this surrogate complexity gives a ratio in [0, 1] that measures "how complex is this signal relative to a random signal with the same statistics."
