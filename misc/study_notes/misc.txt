@@ -146,6 +146,14 @@ plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=50.0)  # prior 95% interval is
 - The wider the range the bigger the mae
 
 
+--------------------------------------------------------------------
+- ver los últimos 5 minutos del scatterplot del LZc
+- scatterplot (ver que pasa con R2)
+
+- non linear fit (1 exponencial, 2 exponenciales)
+
+- subject alignment. desambiguar que parte del eeg es variabilidad debido a los sujetos y cual debido al dmt
+  - calcular features, hacer el baseline pre injection con la media y luego hacer los deltas con post injection , restarle el baseline al dmt
 
 
 
