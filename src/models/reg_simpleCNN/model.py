@@ -31,34 +31,35 @@ class SimpleCNN(nn.Module):
 
     def __init__(self, in_channels=32, dropout=0.3):
         super().__init__()
+        c1, c2, c3 = 48, 96, 192
         self.block1 = nn.Sequential(
-            nn.Conv1d(in_channels, 32, kernel_size=15, stride=8, padding=7),
-            nn.BatchNorm1d(32),
+            nn.Conv1d(in_channels, c1, kernel_size=15, stride=8, padding=7),
+            nn.BatchNorm1d(c1),
             nn.ReLU(),
         )
-        self.se1 = SE(32)
+        self.se1 = SE(c1)
         self.drop1 = nn.Dropout(dropout)
         self.block2 = nn.Sequential(
-            nn.Conv1d(32, 64, kernel_size=7, stride=4, padding=3),
-            nn.BatchNorm1d(64),
+            nn.Conv1d(c1, c2, kernel_size=7, stride=4, padding=3),
+            nn.BatchNorm1d(c2),
             nn.ReLU(),
         )
-        self.se2 = SE(64)
+        self.se2 = SE(c2)
         self.drop2 = nn.Dropout(dropout)
 
         self.block3 = nn.Sequential(
-            nn.Conv1d(64, 128, kernel_size=7, stride=4, padding=3),
-            nn.BatchNorm1d(128),
+            nn.Conv1d(c2, c3, kernel_size=7, stride=4, padding=3),
+            nn.BatchNorm1d(c3),
             nn.ReLU(),
         )
-        self.se3 = SE(128)
+        self.se3 = SE(c3)
         self.drop3 = nn.Dropout(dropout)
 
         self.pool = nn.Sequential(
             nn.AdaptiveAvgPool1d(1),
             nn.Flatten(),
         )
-        self.regressor = nn.Linear(128, 1)
+        self.regressor = nn.Linear(c3, 1)
 
     def extract_features(self, x):
         """Return 128-dim features before the regressor head."""
