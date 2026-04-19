@@ -52,6 +52,8 @@ def parse_args():
                    help="Training loss. smoothl1 is Huber-like, robust to outliers.")
     p.add_argument("--huber_beta", type=float, default=10.0,
                    help="SmoothL1 beta (ng/mL). Errors smaller use L2, larger use L1.")
+    p.add_argument("--mixup_alpha", type=float, default=0.2,
+                   help="Mixup Beta(a,a) sampling. 0 disables.")
     p.add_argument("--subjects", nargs="+", default=None,
                    help="Restrict CV to these subject IDs (default: ALL_SUBJECTS)")
     p.add_argument("--experiment_name", type=str,
@@ -100,12 +102,17 @@ def plot_predicted_vs_actual(y_true, y_pred, title, metrics, artifact_subdir,
     plt.close(fig)
 
 
-def train_one_epoch(model, loader, criterion, optimizer, device):
+def train_one_epoch(model, loader, criterion, optimizer, device, mixup_alpha=0.0):
     model.train()
     total_loss, n_samples = 0.0, 0
     all_preds, all_labels = [], []
     for X, y in loader:
         X, y = X.to(device), y.to(device)
+        if mixup_alpha and mixup_alpha > 0 and X.size(0) > 1:
+            lam = float(np.random.beta(mixup_alpha, mixup_alpha))
+            idx = torch.randperm(X.size(0), device=X.device)
+            X = lam * X + (1.0 - lam) * X[idx]
+            y = lam * y + (1.0 - lam) * y[idx]
         optimizer.zero_grad()
         preds = model(X)
         loss = criterion(preds, y)
@@ -206,7 +213,10 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
 
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
-        train_loss, train_metrics = train_one_epoch(model, train_loader, criterion, optimizer, device)
+        train_loss, train_metrics = train_one_epoch(
+            model, train_loader, criterion, optimizer, device,
+            mixup_alpha=args.mixup_alpha,
+        )
         val_loss, val_metrics, _, _ = evaluate(model, val_loader, criterion, device)
         elapsed = time.time() - t0
 
