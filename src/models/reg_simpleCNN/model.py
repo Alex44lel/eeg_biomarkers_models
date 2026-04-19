@@ -31,7 +31,7 @@ class SimpleCNN(nn.Module):
 
     def __init__(self, in_channels=32, dropout=0.3):
         super().__init__()
-        c1, c2, c3 = 48, 96, 192
+        c1, c2, c3 = 64, 128, 256
         self.block1 = nn.Sequential(
             nn.Conv1d(in_channels, c1, kernel_size=15, stride=8, padding=7),
             nn.BatchNorm1d(c1),
