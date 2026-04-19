@@ -28,6 +28,7 @@ import matplotlib.pyplot as plt
 
 import mlflow
 import mlflow.pytorch
+from mlflow.tracking import MlflowClient
 
 from .model import SimpleCNN
 from .dataset import EEGDataset, ALL_SUBJECTS
@@ -70,7 +71,10 @@ def compute_regression_metrics(y_true, y_pred):
     return {"mae": mae, "rmse": rmse, "mse": mse, "r2": r2}
 
 
-def plot_predicted_vs_actual(y_true, y_pred, title, metrics, artifact_subdir):
+def plot_predicted_vs_actual(y_true, y_pred, title, metrics, artifact_subdir,
+                              extra_targets=None):
+    """Scatter predicted vs actual. Logs to active MLflow run and optionally to
+    extra (client, run_id, artifact_subdir) targets (e.g. parent run)."""
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.scatter(y_true, y_pred, alpha=0.5, s=15, c="steelblue")
     lims = [min(min(y_true), min(y_pred)), max(max(y_true), max(y_pred))]
@@ -85,6 +89,9 @@ def plot_predicted_vs_actual(y_true, y_pred, title, metrics, artifact_subdir):
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         fig.savefig(f.name, dpi=150)
         mlflow.log_artifact(f.name, artifact_subdir)
+        if extra_targets:
+            for client, run_id, subdir in extra_targets:
+                client.log_artifact(run_id, f.name, subdir)
     plt.close(fig)
 
 
@@ -128,8 +135,15 @@ def evaluate(model, loader, criterion, device):
     return total_loss / n_samples, compute_regression_metrics(all_labels, all_preds), all_labels, all_preds
 
 
-def run_fold(args, val_subject, fold_idx, n_folds, device):
-    """Train one LOSO fold. Returns dict with best-model metrics and held-out preds."""
+def run_fold(args, val_subject, fold_idx, n_folds, device,
+             parent_run_id=None, mlf_client=None):
+    """Train one LOSO fold. Returns dict with best-model metrics and held-out preds.
+
+    If parent_run_id + mlf_client are provided, per-epoch training curves are
+    also logged on the parent run under keys fold_{subj}_<metric> with
+    step=epoch, and the scatter plot is mirrored into the parent's
+    per_fold_scatter/ artifacts so curves and plots are all viewable on the
+    parent run."""
     train_subjects = [s for s in ALL_SUBJECTS if s != val_subject]
 
     print("\n" + "=" * 70)
@@ -188,7 +202,7 @@ def run_fold(args, val_subject, fold_idx, n_folds, device):
         val_loss, val_metrics, _, _ = evaluate(model, val_loader, criterion, device)
         elapsed = time.time() - t0
 
-        mlflow.log_metrics({
+        epoch_metrics = {
             "train_loss": train_loss,
             "val_loss": val_loss,
             "train_mae": train_metrics["mae"],
@@ -199,7 +213,14 @@ def run_fold(args, val_subject, fold_idx, n_folds, device):
             "val_mse": val_metrics["mse"],
             "train_r2": train_metrics["r2"],
             "val_r2": val_metrics["r2"],
-        }, step=epoch)
+        }
+        mlflow.log_metrics(epoch_metrics, step=epoch)
+
+        if mlf_client is not None and parent_run_id is not None:
+            for k, v in epoch_metrics.items():
+                mlf_client.log_metric(
+                    parent_run_id, f"fold_{val_subject}_{k}", v, step=epoch
+                )
 
         improved = val_metrics["r2"] > best_val_r2
         marker = "*" if improved else " "
@@ -260,11 +281,16 @@ def run_fold(args, val_subject, fold_idx, n_folds, device):
         "best_val_r2": final_val_metrics["r2"],
     })
 
+    extra = None
+    if mlf_client is not None and parent_run_id is not None:
+        extra = [(mlf_client, parent_run_id,
+                  f"per_fold_scatter/fold_{fold_idx:02d}_{val_subject}")]
     plot_predicted_vs_actual(
         y_true, y_pred,
         title=f"Fold {fold_idx}/{n_folds} (val={val_subject})",
         metrics=final_val_metrics,
         artifact_subdir="predicted_vs_actual",
+        extra_targets=extra,
     )
 
     if args.log_model:
@@ -316,7 +342,9 @@ def main():
     )
 
     t_global = time.time()
+    mlf_client = MlflowClient()
     with mlflow.start_run(run_name=run_name) as parent_run:
+        parent_run_id = parent_run.info.run_id
         mlflow.log_params({
             "lr": args.lr,
             "batch_size": args.batch_size,
@@ -349,18 +377,24 @@ def main():
                     "cv_scheme": "leave-one-subject-out",
                     "early_stop_metric": "val_r2",
                 })
-                res = run_fold(args, subj, i, n_folds, device)
+                res = run_fold(args, subj, i, n_folds, device,
+                               parent_run_id=parent_run_id,
+                               mlf_client=mlf_client)
                 fold_results.append(res)
 
-            # Per-fold best metrics on PARENT run (easy sweep comparison)
-            mlflow.log_metrics({
-                f"fold_{subj}_val_r2": res["best_val_r2"],
-                f"fold_{subj}_val_mae": res["best_val_mae"],
-                f"fold_{subj}_val_rmse": res["best_val_rmse"],
-                f"fold_{subj}_val_mse": res["best_val_mse"],
-                f"fold_{subj}_val_loss": res["best_val_loss"],
-                f"fold_{subj}_best_epoch": res["best_epoch"],
-            }, step=i)
+            # Per-fold best (scalar) summary on PARENT run — single step, easy to read in UI table
+            mlf_client.log_metric(parent_run_id, f"fold_{subj}_best_val_r2",
+                                  res["best_val_r2"])
+            mlf_client.log_metric(parent_run_id, f"fold_{subj}_best_val_mae",
+                                  res["best_val_mae"])
+            mlf_client.log_metric(parent_run_id, f"fold_{subj}_best_val_rmse",
+                                  res["best_val_rmse"])
+            mlf_client.log_metric(parent_run_id, f"fold_{subj}_best_val_mse",
+                                  res["best_val_mse"])
+            mlf_client.log_metric(parent_run_id, f"fold_{subj}_best_val_loss",
+                                  res["best_val_loss"])
+            mlf_client.log_metric(parent_run_id, f"fold_{subj}_best_epoch",
+                                  res["best_epoch"])
 
             print(f"  >>> Fold {i}/{n_folds} ({subj}) finished in "
                   f"{time.time() - t_fold:.1f}s", flush=True)
@@ -454,7 +488,7 @@ def main():
         )
         print("=" * 70)
         print(f"  Total wall time: {time.time() - t_global:.1f}s")
-        print(f"  Parent run id:   {parent_run.info.run_id}")
+        print(f"  Parent run id:   {parent_run_id}")
         print(f"  View:            mlflow ui --backend-store-uri mlruns/")
         print("=" * 70, flush=True)
 
