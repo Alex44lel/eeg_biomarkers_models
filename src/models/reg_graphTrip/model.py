@@ -19,15 +19,13 @@ Reading order (bottom-up, simplest first):
 License: BSD 3-Clause
 Authors: Hanna M. Tolle, Lewis J. Ng
 """
-from models.utils import get_model_configs, init_model
+from .utils import get_model_configs, init_model
 from dataclasses import dataclass
 from torch_geometric.nn.resolver import activation_resolver
 from torch_geometric.data import Data, Batch
 from torch_geometric.utils import to_dense_adj, to_dense_batch
 import torch
 from typing import Optional
-import sys
-sys.path.append('../')
 
 
 # ==============================================================================

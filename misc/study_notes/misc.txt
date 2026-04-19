@@ -147,8 +147,8 @@ plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=50.0)  # prior 95% interval is
 
 
 --------------------------------------------------------------------
-- ver los últimos 5 minutos del scatterplot del LZc
-- scatterplot (ver que pasa con R2)
+- ver los últimos 5 minutos del scatterplot del LZc (DONE)
+- scatterplot (ver que pasa con R2) (DONE)
 
 - non linear fit (1 exponencial, 2 exponenciales)
 
@@ -159,6 +159,12 @@ plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=50.0)  # prior 95% interval is
 
 
 
+
+ # Build the dataset (if needed)                                                                 
+  python -m src.models.reg_graphTrip.build_dmt_dataset                                            
+                                                                                                  
+  # Train a single run                                                                            
+  python -m src.models.reg_graphTrip.train_eeg --val_subjects S12 S13   
 
 
 

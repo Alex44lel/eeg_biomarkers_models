@@ -1,8 +1,8 @@
 """
 EEG Graph Model — wraps graphTrip VGAE components for classification or regression.
 
-Bypasses the NodeLevelVGAE config system and directly instantiates the components
-from model.py. This avoids the broken `models.utils` import chain.
+Directly instantiates the components from model.py — the paper's NodeLevelVGAE
+config system is bypassed (not needed for this task).
 
 Architecture:
   1. NodeEmbeddingGraphormer  → node embeddings
@@ -16,25 +16,11 @@ Architecture:
 Loss = VGAE loss (reconstruction + KL) + task_weight * task_loss
 """
 
-import sys
-import types
-from pathlib import Path
-
-# Mock the `models.utils` import so model.py can be loaded
-# We never call init_model/get_model_configs — we instantiate classes directly
-_mock_utils = types.ModuleType("models.utils")
-_mock_utils.get_model_configs = lambda *a, **kw: {}
-_mock_utils.init_model = lambda *a, **kw: None
-_mock_pkg = types.ModuleType("models")
-_mock_pkg.utils = _mock_utils
-sys.modules.setdefault("models", _mock_pkg)
-sys.modules.setdefault("models.utils", _mock_utils)
-
 import torch
 import torch.nn as nn
 from torch_geometric.utils import to_dense_batch
 
-from model import (
+from .model import (
     NodeEmbeddingGraphormer,
     DenseOneLayerEncoder,
     GraphTransformerPooling,

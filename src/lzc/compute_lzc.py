@@ -4,7 +4,7 @@ Compute Lempel-Ziv Complexity (LZ76) from EEG data under DMT administration.
 Pipeline:
 1. Load data_trialsmxm_3s.mat for each subject's DMT session
    - Cell 0: baseline (pre-infusion)
-   - Cells 1-3: post-infusion segments
+   - Cells 1-20: post-infusion segments
 2. Downsample each 3-second trial from 1000Hz to 200Hz
 3. Compute LZ76 per channel per trial, average across channels
 4. Normalize by baseline (cell 0) mean LZc
@@ -101,9 +101,9 @@ def process_subject(mat_path):
     """
     Full LZc pipeline for one subject using data_trialsmxm_3s.mat.
 
-    Cell 0 = baseline, Cells 1-3 = post-injection.
-    Time axis uses sequential trial indexing (3s per trial), which removes
-    the gap between baseline and post-injection recordings.
+    Cell 0 = baseline, Cells 1+ = post-injection.
+    Time axis uses real elapsed time derived from sampleinfo (sample indices
+    at 1000 Hz), preserving gaps between recording segments.
 
     Returns
     -------
@@ -113,33 +113,32 @@ def process_subject(mat_path):
     d = sio.loadmat(mat_path, squeeze_me=True)
     cells = d["data_trialsmxm_3s"]
     ds_factor = 5  # 1000Hz -> 200Hz
+    fs = 1000.0  # sampling rate in Hz
 
-    # Count baseline trials to determine injection time
-    n_baseline = len(cells[0][()]["trial"])
+    # Injection time = start of first post-injection trial (cell 1)
+    injection_sample = cells[1][()]["sampleinfo"][0, 0]
 
-    # --- All cells: sequential trial time ---
     all_lzc = []
     all_times = []
-    trial_idx = 0
 
     for cell_idx in range(len(cells)):
         cell = cells[cell_idx][()]
         trials = cell["trial"]
+        sampleinfo = cell["sampleinfo"]
 
         for j in range(len(trials)):
             trial_ds = decimate(trials[j], ds_factor, axis=1)
             lzc_val = compute_lzc_trial(trial_ds)
-            # Sequential time: each trial is 3 seconds
-            t_min = (trial_idx + 0.5) * 3.0 / 60.0  # midpoint of trial
+            # Real time: midpoint of trial from sampleinfo
+            midpoint_sample = (sampleinfo[j, 0] + sampleinfo[j, 1]) / 2.0
+            t_min = midpoint_sample / fs / 60.0
             all_lzc.append(lzc_val)
             all_times.append(t_min)
-            trial_idx += 1
 
     all_lzc = np.array(all_lzc)
     all_times = np.array(all_times)
 
-    # Injection time on the sequential scale (after all baseline trials)
-    injection_time_min = n_baseline * 3.0 / 60.0
+    injection_time_min = injection_sample / fs / 60.0
 
     print(f"  Total: {len(all_lzc)} trials, injection at {injection_time_min:.1f} min, "
           f"LZc range [{all_lzc.min():.4f}, {all_lzc.max():.4f}]")

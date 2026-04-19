@@ -4,8 +4,9 @@ Training script for graphTrip EEG DMT plasma regression.
 Predicts plasma DMT concentration (ng/mL) from 3-second EEG trials
 using a graph neural network with VGAE reconstruction loss.
 
-Usage:
-    python train_eeg.py --val_subjects S12 S13 --lr 1e-3 --batch_size 16 --epochs 100
+Usage (run from project root):
+    python -m src.models.reg_graphTrip.train_eeg --val_subjects S12 S13 \
+        --lr 1e-3 --batch_size 16 --epochs 100
 """
 
 import argparse
@@ -23,8 +24,8 @@ import matplotlib.pyplot as plt
 import mlflow
 import mlflow.pytorch
 
-from eeg_graph_dataset import EEGGraphDataset, get_subject_split
-from eeg_classifier import EEGGraphClassifier
+from .eeg_graph_dataset import EEGGraphDataset, get_subject_split
+from .eeg_classifier import EEGGraphClassifier
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 

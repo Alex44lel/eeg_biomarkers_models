@@ -2,11 +2,12 @@
 Build NPZ dataset for DMT plasma concentration regression.
 
 For each subject, loads 3-second EEG trials from data_trialsmxm_3s.mat,
-filters to [2, 10] minutes post-injection, and assigns labels from the
+filters to [2, 15] minutes post-injection, and assigns labels from the
 PK model's posterior mean y1 curve (plasma DMT in ng/mL).
 
-Usage:
-    python -m src.models.graphTrip_2.build_dmt_dataset [--trace PATH] [--t-min 2] [--t-max 10]
+Usage (run from project root):
+    python -m src.models.reg_graphTrip.build_dmt_dataset \
+        [--trace PATH] [--t-min 2] [--t-max 15]
 """
 
 import argparse
@@ -50,27 +51,34 @@ EEG_CHANNEL_LABELS = [
 
 
 def compute_y1_curve(trace, subject_idx, t_array):
-    """Compute posterior mean y1 (plasma ng/mL) for one subject at given times.
+    """Compute the posterior-mean y1 curve (plasma ng/mL) for one subject.
 
-    Uses the two-compartment analytical solution (eq. 16) with posterior mean
-    parameters from the fitted PK model.
+    Evaluates eq. 16 per posterior sample and then averages — matches
+    partial_pooling_model.compute_posterior_predictive_y1. Plugging in the
+    posterior means of the parameters first would bias the curve (Jensen's
+    inequality: y1 is non-linear in k0, k1, k2, y_init).
     """
     n_subjects = trace.posterior["y_init"].shape[-1]
-    k0 = trace.posterior["k0"].values.reshape(-1, n_subjects)[:, subject_idx].mean()
-    k1 = trace.posterior["k1"].values.reshape(-1, n_subjects)[:, subject_idx].mean()
-    k2 = trace.posterior["k2"].values.reshape(-1, n_subjects)[:, subject_idx].mean()
-    y_init = trace.posterior["y_init"].values.reshape(-1, n_subjects)[:, subject_idx].mean()
+    k0 = trace.posterior["k0"].values.reshape(-1, n_subjects)[:, subject_idx]       # (S,)
+    k1 = trace.posterior["k1"].values.reshape(-1, n_subjects)[:, subject_idx]
+    k2 = trace.posterior["k2"].values.reshape(-1, n_subjects)[:, subject_idx]
+    y_init = trace.posterior["y_init"].values.reshape(-1, n_subjects)[:, subject_idx]
 
     s = k0 + k1 + k2
     p = k0 * k2
-    disc = max(s**2 - 4 * p, 1e-12)
-    alpha = (s - np.sqrt(disc)) / 2
-    beta = (s + np.sqrt(disc)) / 2
+    disc = np.maximum(s**2 - 4 * p, 1e-12)
+    alpha = (s - np.sqrt(disc)) / 2.0       # (S,)
+    beta = (s + np.sqrt(disc)) / 2.0        # (S,)
 
-    y1 = (y_init / (beta - alpha)
-          * ((k2 - alpha) * np.exp(-alpha * t_array)
-             - (k2 - beta) * np.exp(-beta * t_array)))
-    return y1
+    # Broadcast (S, 1) against (T,) to get per-sample curves of shape (S, T)
+    a = alpha[:, None]
+    b = beta[:, None]
+    k2_ = k2[:, None]
+    y0 = y_init[:, None]
+    t = t_array[None, :]
+
+    y1_samples = (y0 / (b - a)) * ((k2_ - a) * np.exp(-a * t) - (k2_ - b) * np.exp(-b * t))
+    return y1_samples.mean(axis=0)
 
 
 def process_subject(folder_name, subj_id, trace, pk_subject_idx, t_min, t_max):
@@ -127,12 +135,12 @@ def process_subject(folder_name, subj_id, trace, pk_subject_idx, t_min, t_max):
 def main():
     parser = argparse.ArgumentParser(description="Build DMT regression dataset")
     parser.add_argument("--trace", type=str,
-                        default="results/paper_model/partial_pooling_trace.nc",
+                        default="results/paper_model/only_plasma/partial_pooling_trace.nc",
                         help="Path to PK model trace")
     parser.add_argument("--t-min", type=float, default=2.0,
                         help="Start time in minutes post-injection (default: 2)")
-    parser.add_argument("--t-max", type=float, default=10.0,
-                        help="End time in minutes post-injection (default: 10)")
+    parser.add_argument("--t-max", type=float, default=15.0,
+                        help="End time in minutes post-injection (default: 15)")
     args = parser.parse_args()
 
     # Load PK model trace and get subject list
@@ -174,7 +182,7 @@ def main():
     eeg_data = np.concatenate(all_eeg, axis=0)     # (N, 32, 3000)
     labels = np.concatenate(all_labels, axis=0)     # (N,) ng/mL
     times = np.concatenate(all_times, axis=0)       # (N,) minutes
-    subjects = np.concatenate(all_subjects, axis=0) # (N,) subject IDs
+    subjects = np.concatenate(all_subjects, axis=0)  # (N,) subject IDs
 
     out_path = DATA_DIR / "eeg_dmt_regression.npz"
     np.savez(

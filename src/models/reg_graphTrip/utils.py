@@ -9,15 +9,17 @@ Author: Hanna M. Tolle
 import os
 from typing import Dict
 import json
-import models
+
 
 def init_model(model_type: str, params: Dict = {}):
     """Initialises model."""
+    # Lazy import to avoid a circular dependency with model.py
+    from . import model as _model_module
     try:
-        model_class = getattr(models, model_type)
+        model_class = getattr(_model_module, model_type)
     except AttributeError:
         raise ValueError(f"Unknown model type: {model_type}")
-    
+
     model = model_class(**params)
     return model
 

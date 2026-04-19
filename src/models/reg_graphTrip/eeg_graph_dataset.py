@@ -18,7 +18,7 @@ import torch
 from torch_geometric.data import Data, InMemoryDataset
 from pathlib import Path
 
-from eeg_features import compute_band_powers, compute_aec, get_electrode_coords
+from .eeg_features import compute_band_powers, compute_aec, get_electrode_coords
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "eeg_dmt_regression.npz"

@@ -24,7 +24,7 @@ def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None,
         k0_sigma = pm.Exponential("k0_sigma", lam=1.0)
         k1_sigma = pm.Exponential("k1_sigma", lam=1.0)
         k2_sigma = pm.Exponential("k2_sigma", lam=1.0)
-        y_init_sigma = pm.Exponential("y_init_sigma", lam=0.002)  # 500 mean 1/lam
+        y_init_sigma = pm.Exponential("y_init_sigma", lam=0.005)  # 500 mean 1/lam
 
         # Per-subject rate parameters
         k0 = pm.HalfCauchy("k0", beta=k0_sigma, shape=n_subjects)
@@ -106,7 +106,7 @@ def build_model(t, lzc, subject_idx, n_subjects, plasma_data=None,
 def fit_model(model, draws=2000, chains=2):
     """Run MCMC and return InferenceData."""
     with model:
-        trace = pm.sample(tune=1000, draws=draws, chains=chains, target_accept=0.95,
+        trace = pm.sample(tune=2000, draws=draws, chains=chains, target_accept=0.95,
                           cores=chains, return_inferencedata=True)
     return trace
 

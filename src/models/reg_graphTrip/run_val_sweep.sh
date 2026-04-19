@@ -2,12 +2,18 @@
 # Leave-one-out validation sweep using exp03 hyperparams.
 # Each of the 8 available subjects is held out as the sole validation subject.
 # Hyperparams: lr=1e-4, batch_size=16, dropout=0.1, weight_decay=1e-4, task_weight=1.0, patience=20, no coords
-# Usage: bash run_val_sweep.sh
+# Usage: bash src/models/reg_graphTrip/run_val_sweep.sh
+#   (or: bash run_val_sweep.sh from inside this directory)
 
 set -e
-cd "$(dirname "$0")"
 
-PYTHON=python3
+# Resolve project root (three levels up from this script) and run from there
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+cd "$PROJECT_ROOT"
+
+PYTHON="${PYTHON:-python}"
+MODULE="src.models.reg_graphTrip.train_eeg"
 
 echo "================================================"
 echo "  graphTrip Leave-One-Out Val Sweep (8 splits)"
@@ -19,7 +25,7 @@ echo "================================================"
 for SUBJ in S01 S02 S05 S06 S07 S10 S12 S13; do
     echo ""
     echo "--- Val subject: $SUBJ ---"
-    $PYTHON train_eeg.py --lr 1e-4 --batch_size 16 --dropout 0.1 --weight_decay 1e-4 \
+    $PYTHON -m $MODULE --lr 1e-4 --batch_size 16 --dropout 0.1 --weight_decay 1e-4 \
         --task_weight 1.0 --patience 20 --val_subjects "$SUBJ" \
         --run_name "val_sweep_${SUBJ}"
 done
