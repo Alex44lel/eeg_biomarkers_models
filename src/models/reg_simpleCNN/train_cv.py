@@ -43,7 +43,7 @@ def parse_args():
     p.add_argument("--lr", type=float, default=5e-4)
     p.add_argument("--batch_size", type=int, default=64)
     p.add_argument("--epochs", type=int, default=300)
-    p.add_argument("--patience", type=int, default=20,
+    p.add_argument("--patience", type=int, default=40,
                    help="Early-stop patience on val R² (higher is better)")
     p.add_argument("--dropout", type=float, default=0.3)
     p.add_argument("--weight_decay", type=float, default=1e-4)
