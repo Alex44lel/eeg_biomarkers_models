@@ -196,7 +196,7 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
     ema_model.load_state_dict(model.state_dict())
     for p in ema_model.parameters():
         p.requires_grad_(False)
-    ema_decay = 0.995  # per-batch
+    ema_decay = 0.999  # per-batch
 
     if args.loss == "smoothl1":
         criterion = nn.SmoothL1Loss(beta=args.huber_beta)
