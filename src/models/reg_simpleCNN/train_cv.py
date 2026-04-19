@@ -47,6 +47,11 @@ def parse_args():
                    help="Early-stop patience on val R² (higher is better)")
     p.add_argument("--dropout", type=float, default=0.3)
     p.add_argument("--weight_decay", type=float, default=1e-4)
+    p.add_argument("--loss", type=str, default="smoothl1",
+                   choices=["mse", "smoothl1"],
+                   help="Training loss. smoothl1 is Huber-like, robust to outliers.")
+    p.add_argument("--huber_beta", type=float, default=20.0,
+                   help="SmoothL1 beta (ng/mL). Errors smaller use L2, larger use L1.")
     p.add_argument("--subjects", nargs="+", default=None,
                    help="Restrict CV to these subject IDs (default: ALL_SUBJECTS)")
     p.add_argument("--experiment_name", type=str,
@@ -171,7 +176,10 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {n_params:,}")
 
-    criterion = nn.MSELoss()
+    if args.loss == "smoothl1":
+        criterion = nn.SmoothL1Loss(beta=args.huber_beta)
+    else:
+        criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr,
                                  weight_decay=args.weight_decay)
 
