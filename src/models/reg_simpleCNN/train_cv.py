@@ -50,7 +50,7 @@ def parse_args():
     p.add_argument("--loss", type=str, default="smoothl1",
                    choices=["mse", "smoothl1"],
                    help="Training loss. smoothl1 is Huber-like, robust to outliers.")
-    p.add_argument("--huber_beta", type=float, default=20.0,
+    p.add_argument("--huber_beta", type=float, default=10.0,
                    help="SmoothL1 beta (ng/mL). Errors smaller use L2, larger use L1.")
     p.add_argument("--subjects", nargs="+", default=None,
                    help="Restrict CV to these subject IDs (default: ALL_SUBJECTS)")
