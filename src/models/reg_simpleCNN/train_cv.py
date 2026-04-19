@@ -39,7 +39,7 @@ def parse_args():
     p = argparse.ArgumentParser(
         description="LOSO cross-validation for SimpleCNN DMT plasma regression"
     )
-    p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--lr", type=float, default=5e-4)
     p.add_argument("--batch_size", type=int, default=64)
     p.add_argument("--epochs", type=int, default=300)
     p.add_argument("--patience", type=int, default=20,
