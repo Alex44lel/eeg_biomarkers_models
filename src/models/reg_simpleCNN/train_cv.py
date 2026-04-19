@@ -104,7 +104,8 @@ def plot_predicted_vs_actual(y_true, y_pred, title, metrics, artifact_subdir,
     plt.close(fig)
 
 
-def train_one_epoch(model, loader, criterion, optimizer, device, mixup_alpha=0.0):
+def train_one_epoch(model, loader, criterion, optimizer, device,
+                    mixup_alpha=0.0, ema_model=None, ema_decay=0.999):
     model.train()
     total_loss, n_samples = 0.0, 0
     all_preds, all_labels = [], []
@@ -120,6 +121,12 @@ def train_one_epoch(model, loader, criterion, optimizer, device, mixup_alpha=0.0
         loss = criterion(preds, y)
         loss.backward()
         optimizer.step()
+        if ema_model is not None:
+            with torch.no_grad():
+                for pe, p in zip(ema_model.parameters(), model.parameters()):
+                    pe.data.mul_(ema_decay).add_(p.data, alpha=1.0 - ema_decay)
+                for be, b in zip(ema_model.buffers(), model.buffers()):
+                    be.data.copy_(b.data)
         bs = X.size(0)
         total_loss += loss.item() * bs
         n_samples += bs
@@ -185,6 +192,12 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {n_params:,}")
 
+    ema_model = SimpleCNN(in_channels=train_ds.n_channels, dropout=args.dropout).to(device)
+    ema_model.load_state_dict(model.state_dict())
+    for p in ema_model.parameters():
+        p.requires_grad_(False)
+    ema_decay = 0.995  # per-batch
+
     if args.loss == "smoothl1":
         criterion = nn.SmoothL1Loss(beta=args.huber_beta)
     else:
@@ -218,8 +231,9 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
         train_loss, train_metrics = train_one_epoch(
             model, train_loader, criterion, optimizer, device,
             mixup_alpha=args.mixup_alpha,
+            ema_model=ema_model, ema_decay=ema_decay,
         )
-        val_loss, val_metrics, _, _ = evaluate(model, val_loader, criterion, device)
+        val_loss, val_metrics, _, _ = evaluate(ema_model, val_loader, criterion, device)
         elapsed = time.time() - t0
 
         epoch_metrics = {
@@ -260,7 +274,7 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
             best_val_loss = val_loss
             best_val_metrics = val_metrics
             patience_counter = 0
-            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            best_state = {k: v.cpu().clone() for k, v in ema_model.state_dict().items()}
         else:
             patience_counter += 1
             if patience_counter >= args.patience:
@@ -269,13 +283,13 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
                       f"Best: ep{best_epoch}, val_r2={best_val_r2:+.4f}")
                 break
 
-    # Restore best-R² weights and do a clean final eval
+    # Restore best-R² EMA weights and do a clean final eval
     if best_state is not None:
-        model.load_state_dict(best_state)
-        model.to(device)
+        ema_model.load_state_dict(best_state)
+        ema_model.to(device)
 
     final_val_loss, final_val_metrics, y_true, y_pred = evaluate(
-        model, val_loader, criterion, device
+        ema_model, val_loader, criterion, device
     )
 
     print("-" * 70)
