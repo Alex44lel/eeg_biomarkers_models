@@ -33,7 +33,7 @@ import mlflow.pytorch
 from mlflow.tracking import MlflowClient
 
 from .model import SimpleCNN
-from .dataset import EEGDataset, ALL_SUBJECTS
+from .dataset import EEGDataset, ALL_SUBJECTS, DATASET_PATHS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -58,6 +58,11 @@ def parse_args():
                    help="Mixup Beta(a,a) sampling. 0 disables.")
     p.add_argument("--subjects", nargs="+", default=None,
                    help="Restrict CV to these subject IDs (default: ALL_SUBJECTS)")
+    p.add_argument("--dataset", type=str, default="pk",
+                   choices=sorted(DATASET_PATHS.keys()),
+                   help="Which label source to use: 'pk' (PK-model posterior-mean "
+                        "y1 curve, default) or 'biexp' (per-subject bi-exponential "
+                        "fit from build_biexp_dataset.py).")
     p.add_argument("--experiment_name", type=str,
                    default="SimpleCNN_DMT_regression_CV")
     p.add_argument("--run_name", type=str, default=None)
@@ -209,8 +214,8 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
     print(f"Train subjects ({len(train_subjects)}): {train_subjects}")
     print(f"Val subject:                 {val_subject}")
 
-    train_ds = EEGDataset(subjects=train_subjects)
-    val_ds = EEGDataset(subjects=[val_subject])
+    train_ds = EEGDataset(subjects=train_subjects, dataset=args.dataset)
+    val_ds = EEGDataset(subjects=[val_subject], dataset=args.dataset)
     print(f"Train samples: {len(train_ds):5d} | Val samples: {len(val_ds):5d}")
     print(f"Label range (train): [{float(train_ds.labels.min()):.2f}, "
           f"{float(train_ds.labels.max()):.2f}] ng/mL  "
@@ -250,6 +255,7 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
         "n_params": n_params,
         "fold_idx": fold_idx,
         "n_folds": n_folds,
+        "dataset": args.dataset,
     })
 
     best_val_r2 = -float("inf")
@@ -412,6 +418,7 @@ def main():
     print("  SimpleCNN DMT Plasma Regression  |  LOSO Cross-Validation")
     print("=" * 70)
     print(f"Device:        {device}")
+    print(f"Dataset:       {args.dataset}")
     print(f"Subjects ({n_folds}): {cv_subjects}")
     print(f"Hyperparams:   lr={args.lr}  bs={args.batch_size}  "
           f"dropout={args.dropout}  weight_decay={args.weight_decay}")
@@ -446,6 +453,7 @@ def main():
             "cv_scheme": "leave-one-subject-out",
             "early_stop_metric": "val_r2",
             "early_stop_direction": "maximize",
+            "dataset": args.dataset,
         })
 
         fold_results = []
@@ -462,6 +470,7 @@ def main():
                     "seed": args.seed,
                     "cv_scheme": "leave-one-subject-out",
                     "early_stop_metric": "val_r2",
+                    "dataset": args.dataset,
                 })
                 res = run_fold(args, subj, i, n_folds, device,
                                parent_run_id=parent_run_id,

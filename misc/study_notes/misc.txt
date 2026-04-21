@@ -148,6 +148,7 @@ plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=50.0)  # prior 95% interval is
 
 --------------------------------------------------------------------
 - ver los últimos 5 minutos del scatterplot del LZc (DONE)
+  - solventao, simplemente estaba juntando todos los points cada tres segundos en ved de dejar espacios
 - scatterplot (ver que pasa con R2) (DONE)
 
 - non linear fit (1 exponencial, 2 exponenciales)
@@ -171,7 +172,38 @@ dataset i also want a plot of all the subjects. Can you build a plan to do that?
   python -m src.models.reg_graphTrip.train_eeg --val_subjects S12 S13   
 
 
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
 
+- Graphormer no funciona, dejenera a predecir un valor
+  - explicar
+
+- He probado la convnet, y he hecho aun autoresearch (60 experimentos)
+  - explicar mejor experimentos
+  - explicar resto de experimentos
+
+- Cross validation con leave one out, early stopping basado en R2
+
+- He encontrado un sweat spot, aún así R2 no tengo claro que sea la métrica más fiable (enseñar plot lineas)
+- El modelo predice bien algunos de 20mg, a veces alguno de 14mg pero degenera en los de 7mg. Creo que más o menos es capaz de pillar el trend, pero 
+con tan pocos datos al final se centra en la escala de 20mg. A pesar de pillar el trent, no tiene un poder discriminativo muy grande porque no está haciendo bien los de
+7 mg. Puede que con más datos esto se solucione.
+
+- He probado a darle al modelo info de los mg iniciales (no ha mejorado)
+  - explicar como
+- He probado a entrenar solo con 14/20 mg (no a mejorado) 
+  - no mejore signigicatva
+
+- He probado biexponential fit
+  - peores resultsdos
+  - mirar como funciona
+
+- he leido lo que hizo el chico de master del año pasado
+
+Next steps:
+
+- Modelo preentrenado a lo neurorvq
+- Probamos un VAE?
 
 
 

@@ -13,13 +13,16 @@ cd "$PROJECT_ROOT"
 
 PYTHON="${PYTHON:-python}"
 MODULE="src.models.reg_simpleCNN.train_cv"
+DATASET="${DATASET:-pk}"   # 'pk' (default) or 'biexp'
 
 echo "============================================="
 echo "  SimpleCNN LOSO Cross-Validation"
+echo "  Dataset: $DATASET"
 echo "  Early stop on val R² (maximize)"
 echo "============================================="
 
 $PYTHON -m $MODULE \
+    --dataset "$DATASET" \
     --lr 0.0005 \
     --batch_size 64 \
     --dropout 0.3 \
