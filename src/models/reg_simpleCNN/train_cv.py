@@ -157,7 +157,7 @@ def evaluate(model, loader, criterion, device):
 
 
 def run_fold(args, val_subject, fold_idx, n_folds, device,
-             parent_run_id=None, mlf_client=None):
+             parent_run_id=None, mlf_client=None, cv_subjects=None):
     """Train one LOSO fold. Returns dict with best-model metrics and held-out preds.
 
     If parent_run_id + mlf_client are provided, per-epoch training curves are
@@ -165,7 +165,8 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
     step=epoch, and the scatter plot is mirrored into the parent's
     per_fold_scatter/ artifacts so curves and plots are all viewable on the
     parent run."""
-    train_subjects = [s for s in ALL_SUBJECTS if s != val_subject]
+    pool = cv_subjects if cv_subjects is not None else ALL_SUBJECTS
+    train_subjects = [s for s in pool if s != val_subject]
 
     print("\n" + "=" * 70)
     print(f"  FOLD {fold_idx}/{n_folds}  |  val_subject = {val_subject}")
@@ -413,7 +414,8 @@ def main():
                 })
                 res = run_fold(args, subj, i, n_folds, device,
                                parent_run_id=parent_run_id,
-                               mlf_client=mlf_client)
+                               mlf_client=mlf_client,
+                               cv_subjects=cv_subjects)
                 fold_results.append(res)
 
             # Per-fold best (scalar) summary on PARENT run — single step, easy to read in UI table
