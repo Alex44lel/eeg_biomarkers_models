@@ -104,6 +104,36 @@ def plot_predicted_vs_actual(y_true, y_pred, title, metrics, artifact_subdir,
     plt.close(fig)
 
 
+def plot_dmt_evolution(times, y_true, y_pred, title, artifact_subdir):
+    """Line plot of true vs predicted DMT evolution for one fold.
+
+    Axes: y = time (min post-dose), x = plasma DMT (ng/mL). Points sorted
+    by time so the connecting lines trace the PK trajectory. Logged as an
+    MLflow artifact on the active run.
+    """
+    times = np.asarray(times)
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    order = np.argsort(times)
+    t, yt, yp = times[order], y_true[order], y_pred[order]
+
+    fig, ax = plt.subplots(figsize=(6, 7))
+    ax.plot(yt, t, "-o", color="steelblue", markersize=3, linewidth=1.3,
+            label="True")
+    ax.plot(yp, t, "-o", color="darkorange", markersize=3, linewidth=1.3,
+            alpha=0.85, label="Predicted")
+    ax.set_ylabel("Time (min post-dose)")
+    ax.set_xlabel("Plasma DMT (ng/mL)")
+    ax.set_title(title)
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    plt.tight_layout()
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        fig.savefig(f.name, dpi=150)
+        mlflow.log_artifact(f.name, artifact_subdir)
+    plt.close(fig)
+
+
 def train_one_epoch(model, loader, criterion, optimizer, device,
                     mixup_alpha=0.0, ema_model=None, ema_decay=0.999):
     model.train()
@@ -326,6 +356,17 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
         metrics=final_val_metrics,
         artifact_subdir="predicted_vs_actual",
         extra_targets=extra,
+    )
+
+    plot_dmt_evolution(
+        times=val_ds.times,
+        y_true=y_true,
+        y_pred=y_pred,
+        title=(f"DMT evolution — fold {fold_idx}/{n_folds} (val={val_subject})\n"
+               f"MAE={final_val_metrics['mae']:.1f}  "
+               f"RMSE={final_val_metrics['rmse']:.1f}  "
+               f"R²={final_val_metrics['r2']:.3f}"),
+        artifact_subdir="dmt_evolution",
     )
 
     if args.log_model:

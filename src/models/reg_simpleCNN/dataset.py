@@ -36,6 +36,7 @@ class EEGDataset(Dataset):
         all_eeg = ds["eeg_data"]        # (N, 32, 3000)
         all_subjects = ds["subjects"]   # (N,) subject IDs
         all_labels = ds["labels"]       # (N,) plasma ng/mL
+        all_times = ds["times"]         # (N,) minutes post-dose
 
         # Filter by subjects
         if subjects is not None:
@@ -43,6 +44,7 @@ class EEGDataset(Dataset):
             all_eeg = all_eeg[mask]
             all_labels = all_labels[mask]
             all_subjects = all_subjects[mask]
+            all_times = all_times[mask]
 
         # Convert to float32
         all_eeg = all_eeg.astype(np.float32)
@@ -57,6 +59,7 @@ class EEGDataset(Dataset):
         self.eeg = torch.from_numpy(all_eeg)
         self.labels = torch.from_numpy(all_labels.astype(np.float32))
         self.subjects = all_subjects
+        self.times = all_times.astype(np.float32)
         self.n_channels = self.eeg.shape[1]
 
     def __len__(self):
