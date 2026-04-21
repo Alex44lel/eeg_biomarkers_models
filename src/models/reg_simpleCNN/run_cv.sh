@@ -20,14 +20,14 @@ echo "  Early stop on val R² (maximize)"
 echo "============================================="
 
 $PYTHON -m $MODULE \
-    --lr 1e-3 \
+    --lr 0.0005 \
     --batch_size 64 \
     --dropout 0.3 \
     --weight_decay 1e-4 \
     --epochs 300 \
-    --patience 20 \
+    --patience 40 \
     --seed 42 \
-    --run_name "cv_baseline"
+    --run_name "cv_exp55_new_graphs" \
 
 echo ""
 echo "============================================="

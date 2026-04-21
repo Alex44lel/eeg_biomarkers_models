@@ -157,10 +157,10 @@ plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=50.0)  # prior 95% interval is
 
 
 I need to try another approach for @src/models/reg_simpleCNN/ . But for that i need first to       
-  implement a different way of building the dataset. I want to keep the previous approach and being   
-  able to choose with dataset two use. For this new way of generating the data, i want to use a non      
-  linear fir with 2 exponentials only using the post injection DMT points. When generating the        
-  dataset i also want a plot of all the subjects. Can you build a plan to do that?  THen when running reg_simplecnn i want to be able to choose which dataset to use.
+implement a different way of building the dataset. I want to keep the previous approach and being   
+able to choose with dataset two use. For this new way of generating the data, i want to use a non      
+linear fit with 2 exponentials only using the post injection DMT points. When generating the        
+dataset i also want a plot of all the subjects. Can you build a plan to do that?  THen when running reg_simplecnn i want to be able to choose which dataset to use.
 
 
 

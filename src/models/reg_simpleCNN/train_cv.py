@@ -104,12 +104,14 @@ def plot_predicted_vs_actual(y_true, y_pred, title, metrics, artifact_subdir,
     plt.close(fig)
 
 
-def plot_dmt_evolution(times, y_true, y_pred, title, artifact_subdir):
+def plot_dmt_evolution(times, y_true, y_pred, title, artifact_subdir,
+                        extra_targets=None):
     """Line plot of true vs predicted DMT evolution for one fold.
 
-    Axes: y = time (min post-dose), x = plasma DMT (ng/mL). Points sorted
+    Axes: x = time (min post-dose), y = plasma DMT (ng/mL). Points sorted
     by time so the connecting lines trace the PK trajectory. Logged as an
-    MLflow artifact on the active run.
+    MLflow artifact on the active run, and optionally mirrored to extra
+    (client, run_id, artifact_subdir) targets (e.g. parent run).
     """
     times = np.asarray(times)
     y_true = np.asarray(y_true)
@@ -117,13 +119,13 @@ def plot_dmt_evolution(times, y_true, y_pred, title, artifact_subdir):
     order = np.argsort(times)
     t, yt, yp = times[order], y_true[order], y_pred[order]
 
-    fig, ax = plt.subplots(figsize=(6, 7))
-    ax.plot(yt, t, "-o", color="steelblue", markersize=3, linewidth=1.3,
+    fig, ax = plt.subplots(figsize=(7, 6))
+    ax.plot(t, yt, "-o", color="steelblue", markersize=3, linewidth=1.3,
             label="True")
-    ax.plot(yp, t, "-o", color="darkorange", markersize=3, linewidth=1.3,
+    ax.plot(t, yp, "-o", color="darkorange", markersize=3, linewidth=1.3,
             alpha=0.85, label="Predicted")
-    ax.set_ylabel("Time (min post-dose)")
-    ax.set_xlabel("Plasma DMT (ng/mL)")
+    ax.set_xlabel("Time (min post-dose)")
+    ax.set_ylabel("Plasma DMT (ng/mL)")
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
@@ -131,6 +133,9 @@ def plot_dmt_evolution(times, y_true, y_pred, title, artifact_subdir):
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         fig.savefig(f.name, dpi=150)
         mlflow.log_artifact(f.name, artifact_subdir)
+        if extra_targets:
+            for client, run_id, subdir in extra_targets:
+                client.log_artifact(run_id, f.name, subdir)
     plt.close(fig)
 
 
@@ -358,6 +363,10 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
         extra_targets=extra,
     )
 
+    extra_evo = None
+    if mlf_client is not None and parent_run_id is not None:
+        extra_evo = [(mlf_client, parent_run_id,
+                      f"per_fold_dmt_evolution/fold_{fold_idx:02d}_{val_subject}")]
     plot_dmt_evolution(
         times=val_ds.times,
         y_true=y_true,
@@ -367,6 +376,7 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
                f"RMSE={final_val_metrics['rmse']:.1f}  "
                f"R²={final_val_metrics['r2']:.3f}"),
         artifact_subdir="dmt_evolution",
+        extra_targets=extra_evo,
     )
 
     if args.log_model:
