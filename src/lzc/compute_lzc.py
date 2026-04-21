@@ -208,7 +208,7 @@ def main():
             if inj_t is not None:
                 ax.axvline(inj_t, color="red", linestyle="--", linewidth=1)
             ax.set_title(subj)
-            ax.set_ylim(0, 1.05)
+            ax.set_ylim(0.55, 0.9)
 
         for j in range(len(subjects), len(axes)):
             axes[j].set_visible(False)

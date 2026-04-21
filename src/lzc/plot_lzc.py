@@ -57,22 +57,19 @@ def main():
         ax = axes[row][col]
         ax.set_title(subj, fontsize=11)
         ax.set_xlabel("Time (minutes)", fontsize=9)
-        ax.set_ylabel("LZc", fontsize=9)
-        ax.set_ylim(-5, 20)
-        ax.set_xlim(0, 18)
+        ax.set_ylabel("LZc (raw)", fontsize=9)
+        ax.set_ylim(0.55, 0.90)
+        ax.set_xlim(0, 30)
 
         # Plot raw LZc (all 3-second trial values, no resampling)
         subj_lzc = lzc_df[lzc_df["subject"] == subj]
         if len(subj_lzc) > 0:
             ax.scatter(
                 subj_lzc["time_min"],
-                subj_lzc["lzc_normalized"],
+                subj_lzc["lzc_raw"],
                 color="lightpink", s=8, alpha=0.6,
                 edgecolors="none", zorder=2,
             )
-
-        # Baseline reference line
-        ax.axhline(y=0, color="red", linestyle="--", linewidth=0.8, alpha=0.5)
 
         # Right axis: Plasma concentration (shifted by injection offset)
         ax2 = ax.twinx()
