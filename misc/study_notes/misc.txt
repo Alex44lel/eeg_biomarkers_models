@@ -157,14 +157,6 @@ plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=50.0)  # prior 95% interval is
   - calcular features, hacer el baseline pre injection con la media y luego hacer los deltas con post injection , restarle el baseline al dmt
 
 
-I need to try another approach for @src/models/reg_simpleCNN/ . But for that i need first to       
-implement a different way of building the dataset. I want to keep the previous approach and being   
-able to choose with dataset two use. For this new way of generating the data, i want to use a non      
-linear fit with 2 exponentials only using the post injection DMT points. When generating the        
-dataset i also want a plot of all the subjects. Can you build a plan to do that?  THen when running reg_simplecnn i want to be able to choose which dataset to use.
-
-
-
  # Build the dataset (if needed)                                                                 
   python -m src.models.reg_graphTrip.build_dmt_dataset                                            
                                                                                                   
@@ -175,35 +167,67 @@ dataset i also want a plot of all the subjects. Can you build a plan to do that?
 --------------------------------------------------------------------------
 --------------------------------------------------------------------------
 
+- solventao, simplemente estaba juntando todos los points cada tres segundos en ved de dejar espacios
+
 - Graphormer no funciona, dejenera a predecir un valor
-  - explicar
+  - because all the time domain information is collapse into node features and and edge attributes.
 
 - He probado la convnet, y he hecho aun autoresearch (60 experimentos)
-  - explicar mejor experimentos
+- Cross validation con leave one out, early stopping basado en R2
+  - what worked:
+    - lr 1e-3 → 5e-4 
+    - huber loss
+    - EMA decay
+    - wider convs 48/96/192 → 64/128/256 
+    - final model is a mix of this four
+  - what did not work:
+    - more dropout, gradiant clipping, gaussian noise
+    - lr schedulers like cosineAnnealing or warmup
+    - deeper convs, max pooling, bigger mlp head, halving channels, going wider
+
+  - high variance, a bad fold dominates the CV (hard to conclude things)
+  - what helped the most was regularization
+  - R2 punish scale mismatch even when the temporal shape is correct
+  - seed affects runs. Should we do multi-seed CV? Should we do some kind of scale agnostic training( although this means we will only be focusing on differential)
+  - El modelo predice bien algunos de 20mg, a veces alguno de 14mg pero degenera en los de 7mg. Creo que más o menos es capaz de pillar el trend, pero 
+    con tan pocos datos al final se centra en la escala de 20mg. A pesar de pillar el trent, no tiene un poder discriminativo muy grande porque no está haciendo bien los de
+    7 mg. Puede que con más datos esto se solucione.
+  - The model is learning a general task but not able to differenciate between different scales. This is why the subject that degenerates is different. Subjects have
+  different label distributions, even withing the same mg
+
+  - He runneado esta mañana un multiseed con la mejor config para confirmar assumptions:
+    - se confirma, ver tables/plasma_curves.png plots, ver whisper plots mlflow
+    - El modelo aprende pero con las escala de los más representados
+    - S01, S02, S06, siempre degenerating
+    - S013 y S05 a veces funcionan y otras degenerating
+    - S07, S010, S12 funcionan bien
+
   - explicar resto de experimentos
 
-- Cross validation con leave one out, early stopping basado en R2
-
-- He encontrado un sweat spot, aún así R2 no tengo claro que sea la métrica más fiable (enseñar plot lineas)
-- El modelo predice bien algunos de 20mg, a veces alguno de 14mg pero degenera en los de 7mg. Creo que más o menos es capaz de pillar el trend, pero 
-con tan pocos datos al final se centra en la escala de 20mg. A pesar de pillar el trent, no tiene un poder discriminativo muy grande porque no está haciendo bien los de
-7 mg. Puede que con más datos esto se solucione.
-
-- He probado a darle al modelo info de los mg iniciales (no ha mejorado)
-  - explicar como
-- He probado a entrenar solo con 14/20 mg (no a mejorado) 
+- He probado a darle al modelo info de los mg iniciales ()
+  - no mejora significativa
+  - explicar tres estrategias y volver a runnear
+- He probado a entrenar solo con 14/20 mg (mejora cv mean pero si solo cogemos 20mg es similar)
   - no mejore signigicatva
+
+- Tanto con estas dos modificaciones como antes, el modelo en algún fold degenera. Siempre lo hace con 7mg y a veces
+con alguno de 14mg o 20mg.
 
 - He probado biexponential fit
   - peores resultsdos
-  - mirar como funciona
 
 - he leido lo que hizo el chico de master del año pasado
+  - probaría linear que es el que mejor funciono
+  - Hacer media de resting state y restarsela a la señal
+  -
 
 Next steps:
 
-- Modelo preentrenado a lo neurorvq
-- Probamos un VAE?
+- Think of a better metric/objective?
+- Modelo preentrenado a lo neurorvq u otro?
+- Probamos un VAE? Usar non-dmt samples para tener más datos para el espacio latente
+- 
+
 
 
 
