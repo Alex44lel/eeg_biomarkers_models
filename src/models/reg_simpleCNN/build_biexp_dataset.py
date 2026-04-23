@@ -57,10 +57,11 @@ EEG_CHANNEL_LABELS = [
 def biexp(t, A, alpha, B, beta):
     return A * np.exp(-alpha * t) + B * np.exp(-beta * t)
 
+# we do this for each subject
+
 
 def fit_biexp(t_obs, c_obs):
     """Per-subject 2-exponential fit with α>β>0, B>=0, A free, C(t)>=0 on obs range.
-
     Multistart over (α, β, sign(A)) so both monotone-decay (A>=0) and Bateman-
     style peaked (A<0) shapes are explored. Returns (params, ssr) where
     params = (A, alpha, B, beta).
@@ -71,17 +72,19 @@ def fit_biexp(t_obs, c_obs):
     U = 10.0 * c_max + 1.0
 
     # (alpha, beta) seeds in 1/min: fast/slow rates typical for DMT PK.
-    alpha_seeds = [0.3, 1.0, 2.0, 5.0]
-    beta_seeds = [0.02, 0.05, 0.1, 0.2]
+    # intuition: at any given moment, the concentration is decreasing at a rate of 2x the current value per minute (see derivatives)
+    alpha_seeds = [0.3, 1.0, 2.0, 5.0]  # distribution phase (fast)
+    beta_seeds = [0.02, 0.05, 0.1, 0.2]  # elimination phase (slow)
 
     # Bounds: A free in [-U, U], B non-negative. alpha/beta bounds overlap but
     # the α>β admissibility check below rejects non-canonical solutions.
+    # (A, α, B, β)
     bounds_lo = [-U, 1e-4, 0.0, 1e-5]
     bounds_hi = [U, 50.0, U, 5.0]
 
-    # Grid over observation window (plus a tiny pad) for non-negativity check.
+    # Grid over observation window .
     t_check = np.linspace(float(t_obs.min()), float(t_obs.max()), 64)
-    neg_tol = -1e-3 * max(c_max, 1.0)
+    neg_tol = -1e-3 * max(c_max, 1.0)  # negative tolerance
 
     best = None
     for a_s in alpha_seeds:
@@ -100,15 +103,14 @@ def fit_biexp(t_obs, c_obs):
                 except (RuntimeError, ValueError):
                     continue
                 A, alpha, B, beta = popt
-                # Require canonical ordering α>β (reject degenerate fits
-                # instead of swapping — swapping would force B<0 when A<0).
+                # check alpha is at least 1% bigger
                 if alpha <= beta * 1.01:
                     continue
                 # Non-negativity over the observation window.
                 if np.any(biexp(t_check, A, alpha, B, beta) < neg_tol):
                     continue
                 resid = c_obs - biexp(t_obs, A, alpha, B, beta)
-                ssr = float(np.sum(resid ** 2))
+                ssr = float(np.sum(resid ** 2))  # sum of the square residuals
                 if best is None or ssr < best[1]:
                     best = ((A, alpha, B, beta), ssr)
 

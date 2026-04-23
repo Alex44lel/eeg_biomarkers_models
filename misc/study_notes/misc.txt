@@ -167,17 +167,20 @@ plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=50.0)  # prior 95% interval is
 --------------------------------------------------------------------------
 --------------------------------------------------------------------------
 
-- solventao, simplemente estaba juntando todos los points cada tres segundos en ved de dejar espacios
+- bug: solventao, simplemente estaba juntando todos los points cada tres segundos en ved de dejar espacios
 
 - Graphormer no funciona, dejenera a predecir un valor
   - because all the time domain information is collapse into node features and and edge attributes.
 
-- He probado la convnet, y he hecho aun autoresearch (60 experimentos)
+- He probado la convnet, y he hecho un autoresearch (60 experimentos)
 - Cross validation con leave one out, early stopping basado en R2
   - what worked:
     - lr 1e-3 → 5e-4 
-    - huber loss
-    - EMA decay
+    - huber loss (hybrid between MSE and MAE), (if error is bigger than 10ng/ml go with MAE)
+    - EMA decay 
+      - ema_weights = decay * ema_weights + (1 - decay) * model_weights
+      - 0.999
+      - evaluation is done on the EMA model 
     - wider convs 48/96/192 → 64/128/256 
     - final model is a mix of this four
   - what did not work:
@@ -185,10 +188,10 @@ plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=50.0)  # prior 95% interval is
     - lr schedulers like cosineAnnealing or warmup
     - deeper convs, max pooling, bigger mlp head, halving channels, going wider
 
-  - high variance, a bad fold dominates the CV (hard to conclude things)
-  - what helped the most was regularization
+  - high variance, a bad fold dominates the CV 
   - R2 punish scale mismatch even when the temporal shape is correct
-  - seed affects runs. Should we do multi-seed CV? Should we do some kind of scale agnostic training( although this means we will only be focusing on differential)
+  - seed affects runs. 
+  - Should we do some kind of scale agnostic training (although this means we will only be focusing on differential)
   - El modelo predice bien algunos de 20mg, a veces alguno de 14mg pero degenera en los de 7mg. Creo que más o menos es capaz de pillar el trend, pero 
     con tan pocos datos al final se centra en la escala de 20mg. A pesar de pillar el trent, no tiene un poder discriminativo muy grande porque no está haciendo bien los de
     7 mg. Puede que con más datos esto se solucione.
@@ -202,11 +205,14 @@ plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=50.0)  # prior 95% interval is
     - S013 y S05 a veces funcionan y otras degenerating
     - S07, S010, S12 funcionan bien
 
-  - explicar resto de experimentos
-
 - He probado a darle al modelo info de los mg iniciales ()
-  - no mejora significativa
-  - explicar tres estrategias y volver a runnear
+  - no mejora
+  - R2 sigue parecido, hay folds que tienen R2 muy malo
+  - tres appraoches probados:
+    - multiplicative: self.head_mul = nn.Linear(c3, 1)
+    - multiplicative+residual:
+    - concat: meterle la dosis por paciente justo antes de precedir self.head_concat = nn.Linear(c3 + 1, 1)
+
 - He probado a entrenar solo con 14/20 mg (mejora cv mean pero si solo cogemos 20mg es similar)
   - no mejore signigicatva
 
@@ -216,33 +222,41 @@ con alguno de 14mg o 20mg.
 - He probado biexponential fit
   - peores resultsdos
 
-- he leido lo que hizo el chico de master del año pasado
+- he leido lo que hizo el chico de master del año pasado (linear adaptation)
   - probaría linear que es el que mejor funciono
   - Hacer media de resting state y restarsela a la señal
   -
 
 Next steps:
 
-- Think of a better metric/objective?
+- Think of a better metric/objective? Maybe we just care about dmt evolution and not exact value?
+- Hacer linear adaptation?
 - Modelo preentrenado a lo neurorvq u otro?
-- Probamos un VAE? Usar non-dmt samples para tener más datos para el espacio latente
+- Probamos un VAE? Usar non-dmt samples para tener más datos para el espacio latente 
+- como hacemos que esto tome una dirección publicable? is there anything?
+
+
+Según claude, para paper:
+
+- You have a paper here — at ML4H, EMBC, Sci Rep, or a psychedelics-specialty journal — provided you (a) lead  
+with cv_mean r² = +0.30 not pooled 0.75, (b) add band-power baselines, (c) own the N=8 and PK-derived-label
+limitations in the paper itself instead of letting reviewers find them. You probably don't have a top-tier ML
+conference paper without more methodological contribution. But "first demonstration of EEG-based real-time
+plasma DMT estimation" is a genuine contribution worth writing up.
+
+
+- donwsamplear el egg  (parametro)
+  - partir la señal en k 
+  - data augmentation
+- subject alignment
+- AÑADIR plasma ground truth
+- probar a quitar el SE y alguna capa más del modelo
+- hablar con george
+- probar con el brain
+- https://pubmed.ncbi.nlm.nih.gov/39914006/
 - 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+- 
 
 
 
