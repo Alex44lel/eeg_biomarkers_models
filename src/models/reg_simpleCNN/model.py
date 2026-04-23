@@ -27,20 +27,23 @@ class SimpleCNN(nn.Module):
     CNN with SE blocks for EEG plasma-DMT regression.
     Input:  [B, in_channels, 3000]
     Output: [B]  (predicted plasma DMT concentration in ng/mL)
+
+    k1/k2/k3 control kernel sizes of blocks 1/2/3.
+    Receptive field (samples) = k1 + (k2-1)*8 + (k3-1)*32.
     """
 
-    def __init__(self, in_channels=32, dropout=0.3):
+    def __init__(self, in_channels=32, dropout=0.3, k1=15, k2=7, k3=7):
         super().__init__()
         c1, c2, c3 = 64, 128, 256
         self.block1 = nn.Sequential(
-            nn.Conv1d(in_channels, c1, kernel_size=15, stride=8, padding=7),
+            nn.Conv1d(in_channels, c1, kernel_size=k1, stride=8, padding=k1 // 2),
             nn.BatchNorm1d(c1),
             nn.ReLU(),
         )
         self.se1 = SE(c1)
         self.drop1 = nn.Dropout(dropout)
         self.block2 = nn.Sequential(
-            nn.Conv1d(c1, c2, kernel_size=7, stride=4, padding=3),
+            nn.Conv1d(c1, c2, kernel_size=k2, stride=4, padding=k2 // 2),
             nn.BatchNorm1d(c2),
             nn.ReLU(),
         )
@@ -48,7 +51,7 @@ class SimpleCNN(nn.Module):
         self.drop2 = nn.Dropout(dropout)
 
         self.block3 = nn.Sequential(
-            nn.Conv1d(c2, c3, kernel_size=7, stride=4, padding=3),
+            nn.Conv1d(c2, c3, kernel_size=k3, stride=4, padding=k3 // 2),
             nn.BatchNorm1d(c3),
             nn.ReLU(),
         )

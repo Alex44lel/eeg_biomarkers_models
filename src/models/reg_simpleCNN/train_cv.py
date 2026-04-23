@@ -56,6 +56,14 @@ def parse_args():
                    help="SmoothL1 beta (ng/mL). Errors smaller use L2, larger use L1.")
     p.add_argument("--mixup_alpha", type=float, default=0.0,
                    help="Mixup Beta(a,a) sampling. 0 disables.")
+    p.add_argument("--k1", type=int, default=15,
+                   help="Kernel size for block 1 (default 15). RF contribution = k1 samples.")
+    p.add_argument("--k2", type=int, default=7,
+                   help="Kernel size for block 2 (default 7). RF contribution = (k2-1)*8 samples.")
+    p.add_argument("--k3", type=int, default=7,
+                   help="Kernel size for block 3 (default 7). RF contribution = (k3-1)*32 samples.")
+    p.add_argument("--description", type=str, default="",
+                   help="Human-readable experiment description logged to MLflow.")
     p.add_argument("--subjects", nargs="+", default=None,
                    help="Restrict CV to these subject IDs (default: ALL_SUBJECTS)")
     p.add_argument("--dataset", type=str, default="pk",
@@ -229,11 +237,14 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
                             num_workers=0, pin_memory=True)
 
-    model = SimpleCNN(in_channels=train_ds.n_channels, dropout=args.dropout).to(device)
+    model = SimpleCNN(in_channels=train_ds.n_channels, dropout=args.dropout,
+                      k1=args.k1, k2=args.k2, k3=args.k3).to(device)
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"Model parameters: {n_params:,}")
+    rf_samples = args.k1 + (args.k2 - 1) * 8 + (args.k3 - 1) * 32
+    print(f"Model parameters: {n_params:,}  |  RF = {rf_samples} samples = {rf_samples}ms @ 1kHz")
 
-    ema_model = SimpleCNN(in_channels=train_ds.n_channels, dropout=args.dropout).to(device)
+    ema_model = SimpleCNN(in_channels=train_ds.n_channels, dropout=args.dropout,
+                          k1=args.k1, k2=args.k2, k3=args.k3).to(device)
     ema_model.load_state_dict(model.state_dict())
     for p in ema_model.parameters():
         p.requires_grad_(False)
@@ -256,6 +267,11 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
         "fold_idx": fold_idx,
         "n_folds": n_folds,
         "dataset": args.dataset,
+        "k1": args.k1,
+        "k2": args.k2,
+        "k3": args.k3,
+        "rf_samples": rf_samples,
+        "rf_ms": rf_samples,
     })
 
     best_val_r2 = -float("inf")
@@ -438,6 +454,7 @@ def main():
     mlf_client = MlflowClient()
     with mlflow.start_run(run_name=run_name) as parent_run:
         parent_run_id = parent_run.info.run_id
+        rf_samples = args.k1 + (args.k2 - 1) * 8 + (args.k3 - 1) * 32
         mlflow.log_params({
             "lr": args.lr,
             "batch_size": args.batch_size,
@@ -454,6 +471,12 @@ def main():
             "early_stop_metric": "val_r2",
             "early_stop_direction": "maximize",
             "dataset": args.dataset,
+            "k1": args.k1,
+            "k2": args.k2,
+            "k3": args.k3,
+            "rf_samples": rf_samples,
+            "rf_ms": rf_samples,
+            "description": args.description,
         })
 
         fold_results = []

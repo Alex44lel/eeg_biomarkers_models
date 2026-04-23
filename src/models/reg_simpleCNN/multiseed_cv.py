@@ -67,6 +67,10 @@ def parse_args():
                    choices=["mse", "smoothl1"])
     p.add_argument("--huber_beta", type=float, default=10.0)
     p.add_argument("--mixup_alpha", type=float, default=0.0)
+    p.add_argument("--k1", type=int, default=15)
+    p.add_argument("--k2", type=int, default=7)
+    p.add_argument("--k3", type=int, default=7)
+    p.add_argument("--description", type=str, default="")
     p.add_argument("--subjects", nargs="+", default=None)
     p.add_argument("--dataset", type=str, default="pk",
                    choices=sorted(DATASET_PATHS.keys()))
