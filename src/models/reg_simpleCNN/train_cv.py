@@ -21,6 +21,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -32,10 +33,45 @@ import mlflow
 import mlflow.pytorch
 from mlflow.tracking import MlflowClient
 
-from .model import SimpleCNN
+from .model import SimpleCNN, compute_rf, _DEFAULT_STRIDES
 from .dataset import EEGDataset, ALL_SUBJECTS, DATASET_PATHS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _resolve_kernels_strides(args):
+    """Return (kernels, strides) lists from args.
+    --kernels/--strides take priority; falls back to legacy --k1/k2/k3/k4/n_blocks."""
+    if args.kernels is not None:
+        kernels = args.kernels
+        strides = args.strides if args.strides is not None else _DEFAULT_STRIDES[:len(kernels)]
+    else:
+        k_map = [args.k1, args.k2, args.k3, args.k4]
+        kernels = k_map[:args.n_blocks]
+        strides = _DEFAULT_STRIDES[:args.n_blocks]
+    return kernels, strides
+
+
+_PLASMA_GT_CACHE = None
+
+
+def load_plasma_groundtruth(subject):
+    """Return (times_min, plasma_conc) for the 4 post-injection measured DMT
+    plasma points of `subject` from data/plasma_clean.csv. Cached across calls.
+    Returns (None, None) if the subject is not present."""
+    global _PLASMA_GT_CACHE
+    if _PLASMA_GT_CACHE is None:
+        pdf = pd.read_csv(PROJECT_ROOT / "data" / "plasma_clean.csv")
+        pdf = pdf[(pdf["condition"] == "dmt") & (pdf["time_point"] >= 1)]
+        cache = {}
+        for subj, sdf in pdf.groupby("subject"):
+            sdf = sdf.sort_values("time_min")
+            cache[subj] = (
+                sdf["time_min"].to_numpy(dtype=float),
+                sdf["plasma_conc"].to_numpy(dtype=float),
+            )
+        _PLASMA_GT_CACHE = cache
+    return _PLASMA_GT_CACHE.get(subject, (None, None))
 
 
 def parse_args():
@@ -56,12 +92,25 @@ def parse_args():
                    help="SmoothL1 beta (ng/mL). Errors smaller use L2, larger use L1.")
     p.add_argument("--mixup_alpha", type=float, default=0.0,
                    help="Mixup Beta(a,a) sampling. 0 disables.")
-    p.add_argument("--k1", type=int, default=15,
-                   help="Kernel size for block 1 (default 15). RF contribution = k1 samples.")
-    p.add_argument("--k2", type=int, default=7,
-                   help="Kernel size for block 2 (default 7). RF contribution = (k2-1)*8 samples.")
-    p.add_argument("--k3", type=int, default=7,
-                   help="Kernel size for block 3 (default 7). RF contribution = (k3-1)*32 samples.")
+    # New interface: --kernels / --strides (space-separated lists, take priority)
+    p.add_argument("--kernels", type=int, nargs="+", default=None,
+                   help="Kernel sizes per block, e.g. --kernels 63 15 15. "
+                        "If set, takes priority over --k1/k2/k3/k4/n_blocks.")
+    p.add_argument("--strides", type=int, nargs="+", default=None,
+                   help="Strides per block, e.g. --strides 8 4 4. "
+                        "Defaults to [8,4,4,2,2,2,2][:n_blocks] if not set.")
+    # Legacy interface kept for backward compatibility
+    p.add_argument("--k1", type=int, default=15)
+    p.add_argument("--k2", type=int, default=7)
+    p.add_argument("--k3", type=int, default=7)
+    p.add_argument("--k4", type=int, default=7)
+    p.add_argument("--n_blocks", type=int, default=3, choices=[1, 2, 3, 4, 5, 6, 7])
+    p.add_argument("--early_stop", type=str, default="r2",
+                   choices=["r2", "loss"],
+                   help="Early-stopping criterion: 'r2' (maximize val R², default) "
+                        "or 'loss' (minimize val loss).")
+    p.add_argument("--no_se", action="store_true",
+                   help="Disable Squeeze-and-Excitation blocks (replace with identity).")
     p.add_argument("--description", type=str, default="",
                    help="Human-readable experiment description logged to MLflow.")
     p.add_argument("--subjects", nargs="+", default=None,
@@ -94,13 +143,24 @@ def compute_regression_metrics(y_true, y_pred):
 
 
 def plot_predicted_vs_actual(y_true, y_pred, title, metrics, artifact_subdir,
-                              extra_targets=None):
+                              extra_targets=None, gt_conc=None):
     """Scatter predicted vs actual. Logs to active MLflow run and optionally to
-    extra (client, run_id, artifact_subdir) targets (e.g. parent run)."""
+    extra (client, run_id, artifact_subdir) targets (e.g. parent run).
+
+    If `gt_conc` is given, the measured ground-truth plasma values are
+    overlaid in red on the y=x line as anchor references.
+    """
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.scatter(y_true, y_pred, alpha=0.5, s=15, c="steelblue")
     lims = [min(min(y_true), min(y_pred)), max(max(y_true), max(y_pred))]
     ax.plot(lims, lims, "k--", linewidth=1, label="Perfect prediction")
+    if gt_conc is not None and len(gt_conc) > 0:
+        gt_conc = np.asarray(gt_conc)
+        in_range = (gt_conc >= lims[0]) & (gt_conc <= lims[1])
+        gt_in = gt_conc[in_range]
+        if len(gt_in) > 0:
+            ax.scatter(gt_in, gt_in, alpha=0.5, s=15, c="red",
+                       label="Ground truth (measured)")
     ax.set_xlabel("Actual plasma DMT (ng/mL)")
     ax.set_ylabel("Predicted plasma DMT (ng/mL)")
     ax.set_title(f"{title}\n"
@@ -118,13 +178,16 @@ def plot_predicted_vs_actual(y_true, y_pred, title, metrics, artifact_subdir,
 
 
 def plot_dmt_evolution(times, y_true, y_pred, title, artifact_subdir,
-                        extra_targets=None):
+                        extra_targets=None, gt_times=None, gt_conc=None):
     """Line plot of true vs predicted DMT evolution for one fold.
 
     Axes: x = time (min post-dose), y = plasma DMT (ng/mL). Points sorted
     by time so the connecting lines trace the PK trajectory. Logged as an
     MLflow artifact on the active run, and optionally mirrored to extra
     (client, run_id, artifact_subdir) targets (e.g. parent run).
+
+    If `gt_times` and `gt_conc` are given, the measured ground-truth plasma
+    samples are overlaid as red markers.
     """
     times = np.asarray(times)
     y_true = np.asarray(y_true)
@@ -137,6 +200,14 @@ def plot_dmt_evolution(times, y_true, y_pred, title, artifact_subdir,
             label="True")
     ax.plot(t, yp, "-o", color="darkorange", markersize=3, linewidth=1.3,
             alpha=0.85, label="Predicted")
+    if gt_times is not None and gt_conc is not None and len(gt_times) > 0:
+        gt_times = np.asarray(gt_times)
+        gt_conc = np.asarray(gt_conc)
+        in_range = (gt_times >= float(t.min())) & (gt_times <= float(t.max()))
+        if in_range.any():
+            ax.plot(gt_times[in_range], gt_conc[in_range], "o",
+                    color="red", markersize=3,
+                    label="Ground truth (measured)")
     ax.set_xlabel("Time (min post-dose)")
     ax.set_ylabel("Plasma DMT (ng/mL)")
     ax.set_title(title)
@@ -237,14 +308,17 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
                             num_workers=0, pin_memory=True)
 
+    use_se = not args.no_se
+    kernels, strides = _resolve_kernels_strides(args)
+    rf_samples = compute_rf(kernels, strides)
     model = SimpleCNN(in_channels=train_ds.n_channels, dropout=args.dropout,
-                      k1=args.k1, k2=args.k2, k3=args.k3).to(device)
+                      kernels=kernels, strides=strides, use_se=use_se).to(device)
     n_params = sum(p.numel() for p in model.parameters())
-    rf_samples = args.k1 + (args.k2 - 1) * 8 + (args.k3 - 1) * 32
-    print(f"Model parameters: {n_params:,}  |  RF = {rf_samples} samples = {rf_samples}ms @ 1kHz")
+    print(f"Model parameters: {n_params:,}  |  RF = {rf_samples}ms @ 1kHz  |  "
+          f"n_blocks={len(kernels)}  kernels={kernels}  strides={strides}  SE={use_se}")
 
     ema_model = SimpleCNN(in_channels=train_ds.n_channels, dropout=args.dropout,
-                          k1=args.k1, k2=args.k2, k3=args.k3).to(device)
+                          kernels=kernels, strides=strides, use_se=use_se).to(device)
     ema_model.load_state_dict(model.state_dict())
     for p in ema_model.parameters():
         p.requires_grad_(False)
@@ -267,11 +341,13 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
         "fold_idx": fold_idx,
         "n_folds": n_folds,
         "dataset": args.dataset,
-        "k1": args.k1,
-        "k2": args.k2,
-        "k3": args.k3,
+        "kernels": str(kernels),
+        "strides": str(strides),
+        "n_blocks": len(kernels),
         "rf_samples": rf_samples,
         "rf_ms": rf_samples,
+        "use_se": use_se,
+        "early_stop": args.early_stop,
     })
 
     best_val_r2 = -float("inf")
@@ -280,8 +356,11 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
     best_val_metrics = None
     patience_counter = 0
     best_state = None
+    # sentinel for the monitored metric (direction-aware)
+    best_monitor = float("inf") if args.early_stop == "loss" else -float("inf")
 
-    print(f"\nTraining (max_epochs={args.epochs}, patience={args.patience} on val_r2)")
+    print(f"\nTraining (max_epochs={args.epochs}, patience={args.patience} "
+          f"on val_{args.early_stop})")
     print("-" * 70, flush=True)
 
     for epoch in range(1, args.epochs + 1):
@@ -314,7 +393,9 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
                     parent_run_id, f"fold_{val_subject}_{k}", v, step=epoch
                 )
 
-        improved = val_metrics["r2"] > best_val_r2
+        monitor_val = val_loss if args.early_stop == "loss" else val_metrics["r2"]
+        improved = (monitor_val < best_monitor) if args.early_stop == "loss" \
+                   else (monitor_val > best_monitor)
         marker = "*" if improved else " "
         print(f"  Ep {epoch:3d}/{args.epochs} {marker} | "
               f"loss {train_loss:7.3f}/{val_loss:7.3f} | "
@@ -322,11 +403,12 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
               f"RMSE {train_metrics['rmse']:6.2f}/{val_metrics['rmse']:6.2f} | "
               f"R² {train_metrics['r2']:+.3f}/{val_metrics['r2']:+.3f} | "
               f"{elapsed:4.1f}s  "
-              f"[best val_r2 {best_val_r2:+.3f}@ep{best_epoch}, "
+              f"[best val_{args.early_stop} {best_monitor:.4f}@ep{best_epoch}, "
               f"pat {patience_counter}/{args.patience}]",
               flush=True)
 
         if improved:
+            best_monitor = monitor_val
             best_val_r2 = val_metrics["r2"]
             best_epoch = epoch
             best_val_loss = val_loss
@@ -337,8 +419,8 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
             patience_counter += 1
             if patience_counter >= args.patience:
                 print(f"  Early stop at epoch {epoch} "
-                      f"(no val_r2 improvement for {args.patience} epochs). "
-                      f"Best: ep{best_epoch}, val_r2={best_val_r2:+.4f}")
+                      f"(no val_{args.early_stop} improvement for {args.patience} epochs). "
+                      f"Best: ep{best_epoch}, val_{args.early_stop}={best_monitor:.4f}")
                 break
 
     # Restore best-R² EMA weights and do a clean final eval
@@ -373,6 +455,8 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
         "best_val_r2": final_val_metrics["r2"],
     })
 
+    gt_times, gt_conc = load_plasma_groundtruth(val_subject)
+
     extra = None
     if mlf_client is not None and parent_run_id is not None:
         extra = [(mlf_client, parent_run_id,
@@ -383,6 +467,7 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
         metrics=final_val_metrics,
         artifact_subdir="predicted_vs_actual",
         extra_targets=extra,
+        gt_conc=gt_conc,
     )
 
     extra_evo = None
@@ -399,6 +484,8 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
                f"R²={final_val_metrics['r2']:.3f}"),
         artifact_subdir="dmt_evolution",
         extra_targets=extra_evo,
+        gt_times=gt_times,
+        gt_conc=gt_conc,
     )
 
     if args.log_model:
@@ -454,7 +541,9 @@ def main():
     mlf_client = MlflowClient()
     with mlflow.start_run(run_name=run_name) as parent_run:
         parent_run_id = parent_run.info.run_id
-        rf_samples = args.k1 + (args.k2 - 1) * 8 + (args.k3 - 1) * 32
+        kernels, strides = _resolve_kernels_strides(args)
+        rf_samples = compute_rf(kernels, strides)
+        use_se = not args.no_se
         mlflow.log_params({
             "lr": args.lr,
             "batch_size": args.batch_size,
@@ -468,14 +557,15 @@ def main():
             "seed": args.seed,
             "task": "regression",
             "cv_scheme": "leave-one-subject-out",
-            "early_stop_metric": "val_r2",
-            "early_stop_direction": "maximize",
+            "early_stop_metric": f"val_{args.early_stop}",
+            "early_stop_direction": "minimize" if args.early_stop == "loss" else "maximize",
             "dataset": args.dataset,
-            "k1": args.k1,
-            "k2": args.k2,
-            "k3": args.k3,
+            "kernels": str(kernels),
+            "strides": str(strides),
+            "n_blocks": len(kernels),
             "rf_samples": rf_samples,
             "rf_ms": rf_samples,
+            "use_se": use_se,
             "description": args.description,
         })
 

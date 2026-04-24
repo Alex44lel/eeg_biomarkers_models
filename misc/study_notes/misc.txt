@@ -245,13 +245,28 @@ conference paper without more methodological contribution. But "first demonstrat
 plasma DMT estimation" is a genuine contribution worth writing up.
 
 
-- donwsamplear el egg  (parametro)
+
+- AÑADIR plasma ground truth
+- SEED CV with latest conbination using: (DONE) -> exp55 still the best
+  - full model
+  - full model without SE
+  - only first to convs with SE
+  - only first to convs without SE
+  - only first conv with SE
+  - only first two convs without SE
+
+-------------------------------------------------------
+-------------------------------------------------------
+- runnear mejores exp con stopping based on MAE
+
+- donwsamplear el egg  (parametro) (DEJAR ESTO RUNNEANDO EN EL CLUSTER)
   - partir la señal en k 
   - data augmentation
+
 - subject alignment
-- AÑADIR plasma ground truth
-- probar a quitar el SE y alguna capa más del modelo
-- hablar con george
+
+
+- hablar con george (DONE)
 - probar con el brain
 - https://pubmed.ncbi.nlm.nih.gov/39914006/
 - 

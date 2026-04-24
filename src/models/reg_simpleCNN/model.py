@@ -22,55 +22,74 @@ class SE(nn.Module):
         return x * w
 
 
+class Identity(nn.Module):
+    def forward(self, x):
+        return x
+
+
+# Channel progression: block 1→64, 2→128, 3+→256
+_BLOCK_CHANNELS = [64, 128, 256, 256, 256, 256, 256]
+# Default strides when not specified: blocks 1-7
+_DEFAULT_STRIDES = [8, 4, 4, 2, 2, 2, 2]
+
+
+def compute_rf(kernels, strides):
+    """Receptive field in samples (= ms @ 1kHz) for a stack of strided convs."""
+    rf = kernels[0]
+    stride_product = 1
+    for i in range(1, len(kernels)):
+        stride_product *= strides[i - 1]
+        rf += (kernels[i] - 1) * stride_product
+    return rf
+
+
 class SimpleCNN(nn.Module):
     """
-    CNN with SE blocks for EEG plasma-DMT regression.
+    CNN for EEG plasma-DMT regression.
     Input:  [B, in_channels, 3000]
     Output: [B]  (predicted plasma DMT concentration in ng/mL)
 
-    k1/k2/k3 control kernel sizes of blocks 1/2/3.
-    Receptive field (samples) = k1 + (k2-1)*8 + (k3-1)*32.
+    kernels — list/tuple of kernel sizes, one per block (length = n_blocks, max 7).
+    strides — list/tuple of strides, one per block. Defaults to _DEFAULT_STRIDES[:n].
+    use_se  — if False, SE blocks are replaced with identity.
+
+    Channel progression: 64 / 128 / 256 / 256 / 256 / 256 / 256.
+    RF (ms @ 1kHz) = compute_rf(kernels, strides).
     """
 
-    def __init__(self, in_channels=32, dropout=0.3, k1=15, k2=7, k3=7):
+    def __init__(self, in_channels=32, dropout=0.3,
+                 kernels=(15, 7, 7), strides=None, use_se=True):
+        n = len(kernels)
+        assert 1 <= n <= 7, "kernels must have 1–7 elements"
         super().__init__()
-        c1, c2, c3 = 64, 128, 256
-        self.block1 = nn.Sequential(
-            nn.Conv1d(in_channels, c1, kernel_size=k1, stride=8, padding=k1 // 2),
-            nn.BatchNorm1d(c1),
-            nn.ReLU(),
-        )
-        self.se1 = SE(c1)
-        self.drop1 = nn.Dropout(dropout)
-        self.block2 = nn.Sequential(
-            nn.Conv1d(c1, c2, kernel_size=k2, stride=4, padding=k2 // 2),
-            nn.BatchNorm1d(c2),
-            nn.ReLU(),
-        )
-        self.se2 = SE(c2)
-        self.drop2 = nn.Dropout(dropout)
+        self.n_blocks = n
 
-        self.block3 = nn.Sequential(
-            nn.Conv1d(c2, c3, kernel_size=k3, stride=4, padding=k3 // 2),
-            nn.BatchNorm1d(c3),
-            nn.ReLU(),
-        )
-        self.se3 = SE(c3)
-        self.drop3 = nn.Dropout(dropout)
+        strides = list(strides) if strides is not None else _DEFAULT_STRIDES[:n]
+        assert len(strides) == n, "kernels and strides must have the same length"
 
-        self.pool = nn.Sequential(
-            nn.AdaptiveAvgPool1d(1),
-            nn.Flatten(),
-        )
-        self.regressor = nn.Linear(c3, 1)
+        channels = _BLOCK_CHANNELS[:n]
+        ch_in = in_channels
+        for i, (k, s, ch_out) in enumerate(zip(kernels, strides, channels), start=1):
+            setattr(self, f"block{i}", nn.Sequential(
+                nn.Conv1d(ch_in, ch_out, kernel_size=k, stride=s, padding=k // 2),
+                nn.BatchNorm1d(ch_out),
+                nn.ReLU(),
+            ))
+            setattr(self, f"se{i}", SE(ch_out) if use_se else Identity())
+            setattr(self, f"drop{i}", nn.Dropout(dropout))
+            ch_in = ch_out
+
+        self.pool = nn.Sequential(nn.AdaptiveAvgPool1d(1), nn.Flatten())
+        self.regressor = nn.Linear(channels[-1], 1)
 
     def extract_features(self, x):
-        """Return 128-dim features before the regressor head."""
-        x = self.drop1(self.se1(self.block1(x)))
-        x = self.drop2(self.se2(self.block2(x)))
-        x = self.drop3(self.se3(self.block3(x)))
+        for i in range(1, self.n_blocks + 1):
+            x = getattr(self, f"drop{i}")(
+                getattr(self, f"se{i}")(
+                    getattr(self, f"block{i}")(x)
+                )
+            )
         return self.pool(x)
 
     def forward(self, x):
-        x = self.extract_features(x)
-        return self.regressor(x).squeeze(-1)
+        return self.regressor(self.extract_features(x)).squeeze(-1)

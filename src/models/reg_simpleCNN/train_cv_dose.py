@@ -34,6 +34,7 @@ from mlflow.tracking import MlflowClient
 from .model_dose import SimpleCNNDose
 from .dataset_dose import EEGDoseDataset
 from .dataset import ALL_SUBJECTS
+from .train_cv import load_plasma_groundtruth
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -79,11 +80,18 @@ def compute_regression_metrics(y_true, y_pred):
 
 
 def plot_predicted_vs_actual(y_true, y_pred, title, metrics, artifact_subdir,
-                              extra_targets=None):
+                              extra_targets=None, gt_conc=None):
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.scatter(y_true, y_pred, alpha=0.5, s=15, c="steelblue")
     lims = [min(min(y_true), min(y_pred)), max(max(y_true), max(y_pred))]
     ax.plot(lims, lims, "k--", linewidth=1, label="Perfect prediction")
+    if gt_conc is not None and len(gt_conc) > 0:
+        gt_conc = np.asarray(gt_conc)
+        in_range = (gt_conc >= lims[0]) & (gt_conc <= lims[1])
+        gt_in = gt_conc[in_range]
+        if len(gt_in) > 0:
+            ax.scatter(gt_in, gt_in, alpha=0.5, s=15, c="red",
+                       label="Ground truth (measured)")
     ax.set_xlabel("Actual plasma DMT (ng/mL)")
     ax.set_ylabel("Predicted plasma DMT (ng/mL)")
     ax.set_title(f"{title}\n"
@@ -101,13 +109,16 @@ def plot_predicted_vs_actual(y_true, y_pred, title, metrics, artifact_subdir,
 
 
 def plot_dmt_evolution(times, y_true, y_pred, title, artifact_subdir,
-                        extra_targets=None):
+                        extra_targets=None, gt_times=None, gt_conc=None):
     """Line plot of true vs predicted DMT evolution for one fold.
 
     Axes: x = time (min post-dose), y = plasma DMT (ng/mL). Points sorted
     by time so the connecting lines trace the PK trajectory. Logged as an
     MLflow artifact on the active run, and optionally mirrored to extra
     (client, run_id, artifact_subdir) targets (e.g. parent run).
+
+    If `gt_times` and `gt_conc` are given, the measured ground-truth plasma
+    samples are overlaid as red markers.
     """
     times = np.asarray(times)
     y_true = np.asarray(y_true)
@@ -120,6 +131,14 @@ def plot_dmt_evolution(times, y_true, y_pred, title, artifact_subdir,
             label="True")
     ax.plot(t, yp, "-o", color="darkorange", markersize=3, linewidth=1.3,
             alpha=0.85, label="Predicted")
+    if gt_times is not None and gt_conc is not None and len(gt_times) > 0:
+        gt_times = np.asarray(gt_times)
+        gt_conc = np.asarray(gt_conc)
+        in_range = (gt_times >= float(t.min())) & (gt_times <= float(t.max()))
+        if in_range.any():
+            ax.plot(gt_times[in_range], gt_conc[in_range], "o",
+                    color="red", markersize=3,
+                    label="Ground truth (measured)")
     ax.set_xlabel("Time (min post-dose)")
     ax.set_ylabel("Plasma DMT (ng/mL)")
     ax.set_title(title)
@@ -352,6 +371,8 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
         "best_val_r2": final_val_metrics["r2"],
     })
 
+    gt_times, gt_conc = load_plasma_groundtruth(val_subject)
+
     extra = None
     if mlf_client is not None and parent_run_id is not None:
         extra = [(mlf_client, parent_run_id,
@@ -362,6 +383,7 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
         metrics=final_val_metrics,
         artifact_subdir="predicted_vs_actual",
         extra_targets=extra,
+        gt_conc=gt_conc,
     )
 
     extra_evo = None
@@ -379,6 +401,8 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
                f"R²={final_val_metrics['r2']:.3f}"),
         artifact_subdir="dmt_evolution",
         extra_targets=extra_evo,
+        gt_times=gt_times,
+        gt_conc=gt_conc,
     )
 
     if args.log_model:

@@ -43,7 +43,8 @@ import torch
 from mlflow.tracking import MlflowClient
 
 from .dataset import ALL_SUBJECTS, DATASET_PATHS, EEGDataset
-from .train_cv import compute_regression_metrics, run_fold
+from .train_cv import compute_regression_metrics, run_fold, _resolve_kernels_strides
+from .model import compute_rf, _DEFAULT_STRIDES
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -67,9 +68,15 @@ def parse_args():
                    choices=["mse", "smoothl1"])
     p.add_argument("--huber_beta", type=float, default=10.0)
     p.add_argument("--mixup_alpha", type=float, default=0.0)
+    p.add_argument("--kernels", type=int, nargs="+", default=None)
+    p.add_argument("--strides", type=int, nargs="+", default=None)
     p.add_argument("--k1", type=int, default=15)
     p.add_argument("--k2", type=int, default=7)
     p.add_argument("--k3", type=int, default=7)
+    p.add_argument("--k4", type=int, default=7)
+    p.add_argument("--n_blocks", type=int, default=3, choices=[1, 2, 3, 4, 5, 6, 7])
+    p.add_argument("--early_stop", type=str, default="r2", choices=["r2", "loss"])
+    p.add_argument("--no_se", action="store_true")
     p.add_argument("--description", type=str, default="")
     p.add_argument("--subjects", nargs="+", default=None)
     p.add_argument("--dataset", type=str, default="pk",
@@ -195,6 +202,13 @@ def main():
         "multiseed": "true",
         "n_seeds": len(args.seeds),
         "seeds": ",".join(str(s) for s in args.seeds),
+        "kernels": str(_resolve_kernels_strides(args)[0]),
+        "strides": str(_resolve_kernels_strides(args)[1]),
+        "n_blocks": len(_resolve_kernels_strides(args)[0]),
+        "rf_ms": compute_rf(*_resolve_kernels_strides(args)),
+        "use_se": not args.no_se,
+        "early_stop": args.early_stop,
+        "description": args.description,
     }
 
     with mlflow.start_run(run_name=args.run_name) as parent_run:
