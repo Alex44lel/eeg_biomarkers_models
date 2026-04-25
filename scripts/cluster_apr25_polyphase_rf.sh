@@ -13,6 +13,8 @@ export PATH=/vol/bitbucket/${USER}/eeg_biomarkers_models/env/bin/:$PATH
 source activate
 . /vol/cuda/12.0.0/setup.sh
 export MPLBACKEND=Agg
+export MPLCONFIGDIR=/tmp/matplotlib-${SLURM_JOB_ID}
+export MLFLOW_TRACKING_URI=file:///vol/bitbucket/ac5725/eeg_biomarkers_models/mlruns
 
 nvidia-smi
 
