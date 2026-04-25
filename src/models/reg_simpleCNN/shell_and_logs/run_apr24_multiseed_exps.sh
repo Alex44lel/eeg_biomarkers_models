@@ -2,11 +2,11 @@
 # apr24 depth × SE ablation — multi-seed LOSO CV.
 # Best kernel config from apr23 (k1=63/k2=15/k3=15, RF=623ms) held fixed.
 # 6 experiments: 3 depth levels (1/2/3 blocks) × 2 SE conditions.
-# Run from project root: bash src/models/reg_simpleCNN/run_apr24_multiseed_exps.sh
+# Run from project root: bash src/models/reg_simpleCNN/shell_and_logs/run_apr24_multiseed_exps.sh
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 cd "$PROJECT_ROOT"
 
 PYTHON="${PYTHON:-python}"
