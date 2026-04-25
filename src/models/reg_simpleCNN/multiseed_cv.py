@@ -37,7 +37,6 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import dagshub
 import mlflow
 import numpy as np
 import torch
@@ -179,7 +178,6 @@ def main():
     print(f"Training:      max_epochs={args.epochs}  patience={args.patience}")
     print("=" * 70, flush=True)
 
-    dagshub.init(repo_owner="Alex44lel", repo_name="eeg_biomarkers_models", mlflow=True)
     mlflow.set_experiment(args.experiment_name)
 
     t_global = time.time()

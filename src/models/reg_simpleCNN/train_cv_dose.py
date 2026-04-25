@@ -27,7 +27,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-import dagshub
 import mlflow
 import mlflow.pytorch
 from mlflow.tracking import MlflowClient
@@ -449,7 +448,6 @@ def main():
     print(f"Seed:          {args.seed}")
     print("=" * 70, flush=True)
 
-    dagshub.init(repo_owner="Alex44lel", repo_name="eeg_biomarkers_models", mlflow=True)
     mlflow.set_experiment(args.experiment_name)
 
     run_name = args.run_name or f"cv_dose_{args.dose_mode}"
