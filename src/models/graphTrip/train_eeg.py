@@ -19,6 +19,7 @@ from sklearn.metrics import confusion_matrix
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 
+import dagshub
 import mlflow
 import mlflow.pytorch
 
@@ -257,7 +258,7 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     # MLflow
-    mlflow.set_tracking_uri(str(PROJECT_ROOT / "mlruns"))
+    dagshub.init(repo_owner="Alex44lel", repo_name="eeg_biomarkers_models", mlflow=True)
     mlflow.set_experiment(args.experiment_name)
 
     run_name = args.run_name or (

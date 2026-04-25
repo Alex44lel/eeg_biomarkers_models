@@ -29,6 +29,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+import dagshub
 import mlflow
 import mlflow.pytorch
 from mlflow.tracking import MlflowClient
@@ -118,8 +119,11 @@ def parse_args():
     p.add_argument("--dataset", type=str, default="pk",
                    choices=sorted(DATASET_PATHS.keys()),
                    help="Which label source to use: 'pk' (PK-model posterior-mean "
-                        "y1 curve, default) or 'biexp' (per-subject bi-exponential "
-                        "fit from build_biexp_dataset.py).")
+                        "y1 curve, default), 'biexp' (per-subject bi-exponential "
+                        "fit from build_biexp_dataset.py), or one of the "
+                        "polyphase-downsampled variants pk_k2 / pk_k3 / pk_k4.")
+    p.add_argument("--data_path", type=str, default=None,
+                   help="Optional explicit npz path (overrides --dataset).")
     p.add_argument("--experiment_name", type=str,
                    default="SimpleCNN_DMT_regression_CV")
     p.add_argument("--run_name", type=str, default=None)
@@ -293,9 +297,42 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
     print(f"Train subjects ({len(train_subjects)}): {train_subjects}")
     print(f"Val subject:                 {val_subject}")
 
-    train_ds = EEGDataset(subjects=train_subjects, dataset=args.dataset)
-    val_ds = EEGDataset(subjects=[val_subject], dataset=args.dataset)
-    print(f"Train samples: {len(train_ds):5d} | Val samples: {len(val_ds):5d}")
+    data_path = getattr(args, "data_path", None)
+    train_ds = EEGDataset(subjects=train_subjects, dataset=args.dataset,
+                          data_path=data_path)
+    val_ds = EEGDataset(subjects=[val_subject], dataset=args.dataset,
+                        data_path=data_path)
+
+    # Sanity: train/val subject sets must be disjoint, and if the dataset
+    # carries polyphase metadata every orig_trial_id must live entirely on
+    # one side of the split (LOSO subject grouping guarantees this — the
+    # assert is a cheap guard for any future change).
+    train_subj_set = set(train_ds.subjects.tolist())
+    val_subj_set = set(val_ds.subjects.tolist())
+    assert train_subj_set.isdisjoint(val_subj_set), (
+        f"subject leakage: {train_subj_set & val_subj_set}"
+    )
+    assert val_subj_set <= {val_subject}, (
+        f"val_ds has unexpected subjects: {val_subj_set - {val_subject}}"
+    )
+    if train_ds.orig_trial_id is not None and val_ds.orig_trial_id is not None:
+        train_oids = set(train_ds.orig_trial_id.tolist())
+        val_oids = set(val_ds.orig_trial_id.tolist())
+        assert train_oids.isdisjoint(val_oids), (
+            f"polyphase leakage: {len(train_oids & val_oids)} orig_trial_ids "
+            f"appear in both train and val"
+        )
+        # Each parent trial in val should contribute exactly k_factor rows
+        if train_ds.k_factor > 1:
+            from collections import Counter
+            val_counts = Counter(val_ds.orig_trial_id.tolist())
+            assert all(c == val_ds.k_factor for c in val_counts.values()), (
+                f"val polyphase grouping broken: counts != k_factor "
+                f"({val_ds.k_factor})"
+            )
+
+    print(f"Train samples: {len(train_ds):5d} | Val samples: {len(val_ds):5d} "
+          f"| L={train_ds.signal_length} | k_factor={train_ds.k_factor}")
     print(f"Label range (train): [{float(train_ds.labels.min()):.2f}, "
           f"{float(train_ds.labels.max()):.2f}] ng/mL  "
           f"(mean={float(train_ds.labels.mean()):.2f})")
@@ -530,7 +567,7 @@ def main():
     print(f"Seed:          {args.seed}")
     print("=" * 70, flush=True)
 
-    mlflow.set_tracking_uri(str(PROJECT_ROOT / "mlruns"))
+    dagshub.init(repo_owner="Alex44lel", repo_name="eeg_biomarkers_models", mlflow=True)
     mlflow.set_experiment(args.experiment_name)
 
     run_name = args.run_name or (
@@ -560,6 +597,7 @@ def main():
             "early_stop_metric": f"val_{args.early_stop}",
             "early_stop_direction": "minimize" if args.early_stop == "loss" else "maximize",
             "dataset": args.dataset,
+            "data_path": args.data_path or "",
             "kernels": str(kernels),
             "strides": str(strides),
             "n_blocks": len(kernels),

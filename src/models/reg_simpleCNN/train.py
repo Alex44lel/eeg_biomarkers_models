@@ -21,11 +21,12 @@ from torch.utils.data import DataLoader
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 
+import dagshub
 import mlflow
 import mlflow.pytorch
 
 from .model import SimpleCNN
-from .dataset import EEGDataset, get_subject_split
+from .dataset import EEGDataset, get_subject_split, DATASET_PATHS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -41,6 +42,11 @@ def parse_args():
                    help="Early stopping patience (epochs without val loss improvement)")
     p.add_argument("--dropout", type=float, default=0.3)
     p.add_argument("--weight_decay", type=float, default=1e-4)
+    p.add_argument("--dataset", type=str, default="pk",
+                   choices=sorted(DATASET_PATHS.keys()),
+                   help="Label/source registry key (pk, biexp, pk_k2/3/4).")
+    p.add_argument("--data_path", type=str, default=None,
+                   help="Optional explicit npz path (overrides --dataset).")
     p.add_argument("--experiment_name", type=str, default="SimpleCNN_DMT_regression")
     p.add_argument("--run_name", type=str, default=None)
     return p.parse_args()
@@ -197,9 +203,25 @@ def main():
     print(f"Train subjects: {train_subjects}")
     print(f"Val subjects:   {val_subjects}")
 
-    train_ds = EEGDataset(subjects=train_subjects)
-    val_ds = EEGDataset(subjects=val_subjects)
-    print(f"Train samples: {len(train_ds)} | Val samples: {len(val_ds)}")
+    train_ds = EEGDataset(subjects=train_subjects,
+                          dataset=args.dataset, data_path=args.data_path)
+    val_ds = EEGDataset(subjects=val_subjects,
+                        dataset=args.dataset, data_path=args.data_path)
+
+    # Sanity: train/val subject sets disjoint, polyphase rows of any
+    # original trial stay together.
+    train_subj_set = set(train_ds.subjects.tolist())
+    val_subj_set = set(val_ds.subjects.tolist())
+    assert train_subj_set.isdisjoint(val_subj_set), (
+        f"subject leakage: {train_subj_set & val_subj_set}"
+    )
+    if train_ds.orig_trial_id is not None and val_ds.orig_trial_id is not None:
+        assert set(train_ds.orig_trial_id.tolist()).isdisjoint(
+            val_ds.orig_trial_id.tolist()
+        ), "polyphase leakage: orig_trial_ids span train and val"
+
+    print(f"Train samples: {len(train_ds)} | Val samples: {len(val_ds)} "
+          f"| L={train_ds.signal_length} | k_factor={train_ds.k_factor}")
 
     n_channels = train_ds.n_channels
 
@@ -216,7 +238,7 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     # MLflow
-    mlflow.set_tracking_uri(str(PROJECT_ROOT / "mlruns"))
+    dagshub.init(repo_owner="Alex44lel", repo_name="eeg_biomarkers_models", mlflow=True)
     mlflow.set_experiment(args.experiment_name)
 
     run_name = args.run_name or f"lr{args.lr}_bs{args.batch_size}_do{args.dropout}_wd{args.weight_decay}"
@@ -236,6 +258,10 @@ def main():
             "in_channels": n_channels,
             "device": str(device),
             "task": "regression",
+            "dataset": args.dataset,
+            "data_path": args.data_path or "",
+            "k_factor": train_ds.k_factor,
+            "signal_length": train_ds.signal_length,
         })
 
         best_val_loss = float("inf")

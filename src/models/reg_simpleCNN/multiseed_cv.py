@@ -37,6 +37,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import dagshub
 import mlflow
 import numpy as np
 import torch
@@ -81,6 +82,8 @@ def parse_args():
     p.add_argument("--subjects", nargs="+", default=None)
     p.add_argument("--dataset", type=str, default="pk",
                    choices=sorted(DATASET_PATHS.keys()))
+    p.add_argument("--data_path", type=str, default=None,
+                   help="Optional explicit npz path (overrides --dataset).")
     p.add_argument("--experiment_name", type=str,
                    default="SimpleCNN_DMT_regression_CV")
     p.add_argument("--run_name", type=str, default="multiseed_apr19_best")
@@ -176,7 +179,7 @@ def main():
     print(f"Training:      max_epochs={args.epochs}  patience={args.patience}")
     print("=" * 70, flush=True)
 
-    mlflow.set_tracking_uri(str(PROJECT_ROOT / "mlruns"))
+    dagshub.init(repo_owner="Alex44lel", repo_name="eeg_biomarkers_models", mlflow=True)
     mlflow.set_experiment(args.experiment_name)
 
     t_global = time.time()
@@ -196,6 +199,7 @@ def main():
         "early_stop_metric": "val_r2",
         "early_stop_direction": "maximize",
         "dataset": args.dataset,
+        "data_path": args.data_path or "",
         "loss": args.loss,
         "huber_beta": args.huber_beta,
         "mixup_alpha": args.mixup_alpha,
@@ -271,7 +275,8 @@ def main():
                     # matches EEGDataset order → times align.
                     n = len(res["y_true"])
                     val_times = EEGDataset(subjects=[subj],
-                                           dataset=args.dataset).times
+                                           dataset=args.dataset,
+                                           data_path=args.data_path).times
                     npz_seed.extend([seed] * n)
                     npz_subj.extend([subj] * n)
                     npz_time.extend(list(val_times))
