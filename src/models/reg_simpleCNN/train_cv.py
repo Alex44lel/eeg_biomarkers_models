@@ -145,13 +145,68 @@ def compute_regression_metrics(y_true, y_pred):
     return {"mae": mae, "rmse": rmse, "mse": mse, "r2": r2}
 
 
+def polyphase_metrics(y_true, y_pred, k_idx):
+    """Polyphase-aware regression metrics.
+
+    Headline fields ('r2', 'mae', 'rmse', 'mse') are the mean across phases of
+    metrics computed within each k_idx subset — directly comparable to a k=1
+    baseline (within a phase the held-out subject has the same number of
+    parent trials as at k=1). The '*_pooled' fields are the legacy "pool
+    everything together" metrics, and 'per_kidx[k]' holds each phase's full
+    metric dict. When k_idx is None or has a single phase, the two sets of
+    fields coincide and 'per_kidx' is empty.
+    """
+    pooled = compute_regression_metrics(y_true, y_pred)
+    out = {
+        "r2_pooled":   pooled["r2"],
+        "mae_pooled":  pooled["mae"],
+        "rmse_pooled": pooled["rmse"],
+        "mse_pooled":  pooled["mse"],
+    }
+    if k_idx is None or len(np.unique(np.asarray(k_idx))) <= 1:
+        out.update(pooled)
+        out["per_kidx"] = {}
+        return out
+
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    k_idx = np.asarray(k_idx)
+    per_k = {}
+    for k in np.sort(np.unique(k_idx)):
+        mask = k_idx == k
+        per_k[int(k)] = compute_regression_metrics(y_true[mask], y_pred[mask])
+    out["r2"]   = float(np.mean([m["r2"]   for m in per_k.values()]))
+    out["mae"]  = float(np.mean([m["mae"]  for m in per_k.values()]))
+    out["rmse"] = float(np.mean([m["rmse"] for m in per_k.values()]))
+    out["mse"]  = float(np.mean([m["mse"]  for m in per_k.values()]))
+    out["per_kidx"] = per_k
+    return out
+
+
+class _IndexedDataset(torch.utils.data.Dataset):
+    """Wraps a Dataset so __getitem__ also returns the dataset index. Lets us
+    recover per-sample metadata (e.g. k_idx) after DataLoader shuffling."""
+
+    def __init__(self, base):
+        self.base = base
+
+    def __len__(self):
+        return len(self.base)
+
+    def __getitem__(self, idx):
+        x, y = self.base[idx]
+        return x, y, idx
+
+
 def plot_predicted_vs_actual(y_true, y_pred, title, metrics, artifact_subdir,
-                              extra_targets=None, gt_conc=None):
+                              extra_targets=None, gt_conc=None, filename=None):
     """Scatter predicted vs actual. Logs to active MLflow run and optionally to
     extra (client, run_id, artifact_subdir) targets (e.g. parent run).
 
     If `gt_conc` is given, the measured ground-truth plasma values are
-    overlaid in red on the y=x line as anchor references.
+    overlaid in red on the y=x line as anchor references. If `filename` is
+    given, the artifact is saved under that explicit basename (used by the
+    polyphase per-k_idx plotting loop to produce kidx0.png / kidx1.png …).
     """
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.scatter(y_true, y_pred, alpha=0.5, s=15, c="steelblue")
@@ -171,17 +226,27 @@ def plot_predicted_vs_actual(y_true, y_pred, title, metrics, artifact_subdir,
                  f"R²={metrics['r2']:.3f}")
     ax.legend()
     plt.tight_layout()
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-        fig.savefig(f.name, dpi=150)
-        mlflow.log_artifact(f.name, artifact_subdir)
-        if extra_targets:
-            for client, run_id, subdir in extra_targets:
-                client.log_artifact(run_id, f.name, subdir)
+    if filename is not None:
+        with tempfile.TemporaryDirectory() as td:
+            path = str(Path(td) / filename)
+            fig.savefig(path, dpi=150)
+            mlflow.log_artifact(path, artifact_subdir)
+            if extra_targets:
+                for client, run_id, subdir in extra_targets:
+                    client.log_artifact(run_id, path, subdir)
+    else:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            fig.savefig(f.name, dpi=150)
+            mlflow.log_artifact(f.name, artifact_subdir)
+            if extra_targets:
+                for client, run_id, subdir in extra_targets:
+                    client.log_artifact(run_id, f.name, subdir)
     plt.close(fig)
 
 
 def plot_dmt_evolution(times, y_true, y_pred, title, artifact_subdir,
-                        extra_targets=None, gt_times=None, gt_conc=None):
+                        extra_targets=None, gt_times=None, gt_conc=None,
+                        filename=None):
     """Line plot of true vs predicted DMT evolution for one fold.
 
     Axes: x = time (min post-dose), y = plasma DMT (ng/mL). Points sorted
@@ -190,7 +255,9 @@ def plot_dmt_evolution(times, y_true, y_pred, title, artifact_subdir,
     (client, run_id, artifact_subdir) targets (e.g. parent run).
 
     If `gt_times` and `gt_conc` are given, the measured ground-truth plasma
-    samples are overlaid as red markers.
+    samples are overlaid as red markers. If `filename` is given, the artifact
+    is saved under that explicit basename (used by the polyphase per-k_idx
+    plotting loop to produce kidx0.png / kidx1.png …).
     """
     times = np.asarray(times)
     y_true = np.asarray(y_true)
@@ -217,27 +284,47 @@ def plot_dmt_evolution(times, y_true, y_pred, title, artifact_subdir,
     ax.grid(True, alpha=0.3)
     ax.legend()
     plt.tight_layout()
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-        fig.savefig(f.name, dpi=150)
-        mlflow.log_artifact(f.name, artifact_subdir)
-        if extra_targets:
-            for client, run_id, subdir in extra_targets:
-                client.log_artifact(run_id, f.name, subdir)
+    if filename is not None:
+        with tempfile.TemporaryDirectory() as td:
+            path = str(Path(td) / filename)
+            fig.savefig(path, dpi=150)
+            mlflow.log_artifact(path, artifact_subdir)
+            if extra_targets:
+                for client, run_id, subdir in extra_targets:
+                    client.log_artifact(run_id, path, subdir)
+    else:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            fig.savefig(f.name, dpi=150)
+            mlflow.log_artifact(f.name, artifact_subdir)
+            if extra_targets:
+                for client, run_id, subdir in extra_targets:
+                    client.log_artifact(run_id, f.name, subdir)
     plt.close(fig)
 
 
 def train_one_epoch(model, loader, criterion, optimizer, device,
                     mixup_alpha=0.0, ema_model=None, ema_decay=0.999):
+    """Run one training epoch.
+
+    The loader is expected to yield (X, y, dataset_idx) triples (use
+    `_IndexedDataset` to wrap a regular Dataset). Returns
+    (mean_loss, y_true, y_pred, dataset_indices) so callers can recover each
+    sample's metadata (e.g. polyphase k_idx) and compute phase-aware metrics.
+
+    When mixup is active the labels in y_true reflect the *mixed* targets, so
+    polyphase grouping by dataset_idx is only strictly meaningful with
+    mixup_alpha=0 — the default for every config in this project.
+    """
     model.train()
     total_loss, n_samples = 0.0, 0
-    all_preds, all_labels = [], []
-    for X, y in loader:
+    all_preds, all_labels, all_indices = [], [], []
+    for X, y, idx in loader:
         X, y = X.to(device), y.to(device)
         if mixup_alpha and mixup_alpha > 0 and X.size(0) > 1:
             lam = float(np.random.beta(mixup_alpha, mixup_alpha))
-            idx = torch.randperm(X.size(0), device=X.device)
-            X = lam * X + (1.0 - lam) * X[idx]
-            y = lam * y + (1.0 - lam) * y[idx]
+            perm = torch.randperm(X.size(0), device=X.device)
+            X = lam * X + (1.0 - lam) * X[perm]
+            y = lam * y + (1.0 - lam) * y[perm]
         optimizer.zero_grad()
         preds = model(X)
         loss = criterion(preds, y)
@@ -254,9 +341,11 @@ def train_one_epoch(model, loader, criterion, optimizer, device,
         n_samples += bs
         all_preds.append(preds.detach().cpu().numpy())
         all_labels.append(y.cpu().numpy())
+        all_indices.append(idx.numpy() if torch.is_tensor(idx) else np.asarray(idx))
     all_preds = np.concatenate(all_preds)
     all_labels = np.concatenate(all_labels)
-    return total_loss / n_samples, compute_regression_metrics(all_labels, all_preds)
+    all_indices = np.concatenate(all_indices)
+    return total_loss / n_samples, all_labels, all_preds, all_indices
 
 
 @torch.no_grad()
@@ -339,7 +428,8 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
           f"{float(val_ds.labels.max()):.2f}] ng/mL  "
           f"(mean={float(val_ds.labels.mean()):.2f})")
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
+    train_loader = DataLoader(_IndexedDataset(train_ds),
+                              batch_size=args.batch_size, shuffle=True,
                               num_workers=0, pin_memory=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
                             num_workers=0, pin_memory=True)
@@ -401,12 +491,18 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
 
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
-        train_loss, train_metrics = train_one_epoch(
+        train_loss, train_yt, train_yp, train_idx = train_one_epoch(
             model, train_loader, criterion, optimizer, device,
             mixup_alpha=args.mixup_alpha,
             ema_model=ema_model, ema_decay=ema_decay,
         )
-        val_loss, val_metrics, _, _ = evaluate(ema_model, val_loader, criterion, device)
+        train_k = (train_ds.k_idx[train_idx]
+                   if train_ds.k_idx is not None else None)
+        train_metrics = polyphase_metrics(train_yt, train_yp, train_k)
+
+        val_loss, _, val_yt, val_yp = evaluate(
+            ema_model, val_loader, criterion, device)
+        val_metrics = polyphase_metrics(val_yt, val_yp, val_ds.k_idx)
         elapsed = time.time() - t0
 
         epoch_metrics = {
@@ -421,6 +517,13 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
             "train_r2": train_metrics["r2"],
             "val_r2": val_metrics["r2"],
         }
+        if val_ds.k_factor > 1:
+            epoch_metrics.update({
+                "train_r2_pooled": train_metrics["r2_pooled"],
+                "val_r2_pooled":   val_metrics["r2_pooled"],
+                "train_mae_pooled": train_metrics["mae_pooled"],
+                "val_mae_pooled":   val_metrics["mae_pooled"],
+            })
         mlflow.log_metrics(epoch_metrics, step=epoch)
 
         if mlf_client is not None and parent_run_id is not None:
@@ -464,9 +567,10 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
         ema_model.load_state_dict(best_state)
         ema_model.to(device)
 
-    final_val_loss, final_val_metrics, y_true, y_pred = evaluate(
+    final_val_loss, _, y_true, y_pred = evaluate(
         ema_model, val_loader, criterion, device
     )
+    final_val_metrics = polyphase_metrics(y_true, y_pred, val_ds.k_idx)
 
     print("-" * 70)
     print(f"  Fold {fold_idx}/{n_folds} BEST:")
@@ -475,54 +579,105 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
     print(f"    val_mae     = {final_val_metrics['mae']:.4f} ng/mL")
     print(f"    val_rmse    = {final_val_metrics['rmse']:.4f} ng/mL")
     print(f"    val_mse     = {final_val_metrics['mse']:.4f}")
-    print(f"    val_r2      = {final_val_metrics['r2']:+.4f}")
+    r2_suffix = (f" (mean across {val_ds.k_factor} phases)"
+                 if val_ds.k_factor > 1 else "")
+    print(f"    val_r2      = {final_val_metrics['r2']:+.4f}{r2_suffix}")
+    if val_ds.k_factor > 1:
+        print(f"    val_r2_pooled = {final_val_metrics['r2_pooled']:+.4f} "
+              f"(legacy: pooled across all phases)")
+        for k, m in final_val_metrics["per_kidx"].items():
+            print(f"      kidx={k}: r2={m['r2']:+.4f} mae={m['mae']:.2f} "
+                  f"rmse={m['rmse']:.2f}")
     print(f"  Predicted vs actual (val, first 5):")
     for i in range(min(5, len(y_true))):
         print(f"    y_true={y_true[i]:8.2f}  y_pred={y_pred[i]:8.2f}  "
               f"err={y_pred[i] - y_true[i]:+8.2f}")
     print(flush=True)
 
-    mlflow.log_metrics({
+    log_payload = {
         "best_epoch": best_epoch,
         "best_val_loss": final_val_loss,
         "best_val_mae": final_val_metrics["mae"],
         "best_val_rmse": final_val_metrics["rmse"],
         "best_val_mse": final_val_metrics["mse"],
         "best_val_r2": final_val_metrics["r2"],
-    })
+    }
+    if val_ds.k_factor > 1:
+        log_payload.update({
+            "best_val_r2_pooled":   final_val_metrics["r2_pooled"],
+            "best_val_mae_pooled":  final_val_metrics["mae_pooled"],
+            "best_val_rmse_pooled": final_val_metrics["rmse_pooled"],
+            "best_val_mse_pooled":  final_val_metrics["mse_pooled"],
+        })
+        for k, m in final_val_metrics["per_kidx"].items():
+            log_payload[f"best_val_r2_kidx{k}"]   = m["r2"]
+            log_payload[f"best_val_mae_kidx{k}"]  = m["mae"]
+            log_payload[f"best_val_rmse_kidx{k}"] = m["rmse"]
+    mlflow.log_metrics(log_payload)
 
     gt_times, gt_conc = load_plasma_groundtruth(val_subject)
 
-    extra = None
+    scatter_extra = None
     if mlf_client is not None and parent_run_id is not None:
-        extra = [(mlf_client, parent_run_id,
-                  f"per_fold_scatter/fold_{fold_idx:02d}_{val_subject}")]
-    plot_predicted_vs_actual(
-        y_true, y_pred,
-        title=f"Fold {fold_idx}/{n_folds} (val={val_subject})",
-        metrics=final_val_metrics,
-        artifact_subdir="predicted_vs_actual",
-        extra_targets=extra,
-        gt_conc=gt_conc,
-    )
-
-    extra_evo = None
+        scatter_extra = [(mlf_client, parent_run_id,
+                          f"per_fold_scatter/fold_{fold_idx:02d}_{val_subject}")]
+    evo_extra = None
     if mlf_client is not None and parent_run_id is not None:
-        extra_evo = [(mlf_client, parent_run_id,
+        evo_extra = [(mlf_client, parent_run_id,
                       f"per_fold_dmt_evolution/fold_{fold_idx:02d}_{val_subject}")]
-    plot_dmt_evolution(
-        times=val_ds.times,
-        y_true=y_true,
-        y_pred=y_pred,
-        title=(f"DMT evolution — fold {fold_idx}/{n_folds} (val={val_subject})\n"
-               f"MAE={final_val_metrics['mae']:.1f}  "
-               f"RMSE={final_val_metrics['rmse']:.1f}  "
-               f"R²={final_val_metrics['r2']:.3f}"),
-        artifact_subdir="dmt_evolution",
-        extra_targets=extra_evo,
-        gt_times=gt_times,
-        gt_conc=gt_conc,
-    )
+
+    if val_ds.k_factor > 1 and val_ds.k_idx is not None:
+        # K plots per fold — one per polyphase phase. Each scatter contains
+        # the same number of parent trials as a k=1 fold, so it's directly
+        # comparable to the baseline.
+        for k, m in final_val_metrics["per_kidx"].items():
+            mask = val_ds.k_idx == k
+            plot_predicted_vs_actual(
+                y_true[mask], y_pred[mask],
+                title=(f"Fold {fold_idx}/{n_folds} (val={val_subject}) "
+                       f"— phase k_idx={k}"),
+                metrics=m,
+                artifact_subdir="predicted_vs_actual",
+                extra_targets=scatter_extra,
+                gt_conc=gt_conc,
+                filename=f"kidx{k}.png",
+            )
+            plot_dmt_evolution(
+                times=val_ds.times[mask],
+                y_true=y_true[mask],
+                y_pred=y_pred[mask],
+                title=(f"DMT evolution — fold {fold_idx}/{n_folds} "
+                       f"(val={val_subject}, phase k_idx={k})\n"
+                       f"MAE={m['mae']:.1f}  RMSE={m['rmse']:.1f}  "
+                       f"R²={m['r2']:.3f}"),
+                artifact_subdir="dmt_evolution",
+                extra_targets=evo_extra,
+                gt_times=gt_times,
+                gt_conc=gt_conc,
+                filename=f"kidx{k}.png",
+            )
+    else:
+        plot_predicted_vs_actual(
+            y_true, y_pred,
+            title=f"Fold {fold_idx}/{n_folds} (val={val_subject})",
+            metrics=final_val_metrics,
+            artifact_subdir="predicted_vs_actual",
+            extra_targets=scatter_extra,
+            gt_conc=gt_conc,
+        )
+        plot_dmt_evolution(
+            times=val_ds.times,
+            y_true=y_true,
+            y_pred=y_pred,
+            title=(f"DMT evolution — fold {fold_idx}/{n_folds} (val={val_subject})\n"
+                   f"MAE={final_val_metrics['mae']:.1f}  "
+                   f"RMSE={final_val_metrics['rmse']:.1f}  "
+                   f"R²={final_val_metrics['r2']:.3f}"),
+            artifact_subdir="dmt_evolution",
+            extra_targets=evo_extra,
+            gt_times=gt_times,
+            gt_conc=gt_conc,
+        )
 
     if args.log_model:
         mlflow.pytorch.log_model(model, "model")
@@ -535,8 +690,15 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
         "best_val_rmse": final_val_metrics["rmse"],
         "best_val_mse": final_val_metrics["mse"],
         "best_val_r2": final_val_metrics["r2"],
+        "best_val_r2_pooled":   final_val_metrics["r2_pooled"],
+        "best_val_mae_pooled":  final_val_metrics["mae_pooled"],
+        "best_val_rmse_pooled": final_val_metrics["rmse_pooled"],
+        "best_val_per_kidx":    final_val_metrics["per_kidx"],
         "y_true": y_true,
         "y_pred": y_pred,
+        "k_idx":  (np.asarray(val_ds.k_idx)
+                   if val_ds.k_idx is not None else None),
+        "k_factor": int(val_ds.k_factor),
         "n_val": len(val_ds),
     }
 
@@ -692,31 +854,71 @@ def main():
         })
 
         # -----  Pooled metrics (concatenate all held-out predictions)  -----
+        # When k>1 the headline `pooled_val_r2` is the mean across phases of
+        # the per-phase pooled R² (each phase pooling across every held-out
+        # subject). This keeps it directly comparable to a non-polyphase
+        # baseline. The legacy "pool everything together" metric is kept under
+        # `*_pooled_all` for transparency.
         all_true = np.concatenate([r["y_true"] for r in fold_results])
         all_pred = np.concatenate([r["y_pred"] for r in fold_results])
-        pooled = compute_regression_metrics(all_true, all_pred)
+        all_kidx = None
+        if all(r.get("k_idx") is not None for r in fold_results):
+            all_kidx = np.concatenate([r["k_idx"] for r in fold_results])
+        pooled = polyphase_metrics(all_true, all_pred, all_kidx)
+        k_factor = fold_results[0].get("k_factor", 1)
 
         print("\n" + "=" * 70)
         print(f"  POOLED (concatenated held-out predictions, N={len(all_true)})")
         print("=" * 70)
-        print(f"  pooled_val_r2:   {pooled['r2']:+.4f}")
+        suffix = (f"  (mean across {k_factor} phases)" if k_factor > 1 else "")
+        print(f"  pooled_val_r2:   {pooled['r2']:+.4f}{suffix}")
         print(f"  pooled_val_mae:  {pooled['mae']:.4f}")
         print(f"  pooled_val_rmse: {pooled['rmse']:.4f}")
         print(f"  pooled_val_mse:  {pooled['mse']:.4f}")
+        if k_factor > 1:
+            print(f"  pooled_val_r2_pooled_all: {pooled['r2_pooled']:+.4f} "
+                  f"(legacy: pooled across all phases)")
+            for k, m in pooled["per_kidx"].items():
+                print(f"    kidx={k}: r2={m['r2']:+.4f} mae={m['mae']:.2f} "
+                      f"rmse={m['rmse']:.2f}")
 
-        mlflow.log_metrics({
+        pooled_log = {
             "pooled_val_r2":   pooled["r2"],
             "pooled_val_mae":  pooled["mae"],
             "pooled_val_rmse": pooled["rmse"],
             "pooled_val_mse":  pooled["mse"],
-        })
+        }
+        if k_factor > 1:
+            pooled_log.update({
+                "pooled_val_r2_pooled_all":   pooled["r2_pooled"],
+                "pooled_val_mae_pooled_all":  pooled["mae_pooled"],
+                "pooled_val_rmse_pooled_all": pooled["rmse_pooled"],
+                "pooled_val_mse_pooled_all":  pooled["mse_pooled"],
+            })
+            for k, m in pooled["per_kidx"].items():
+                pooled_log[f"pooled_val_r2_kidx{k}"]   = m["r2"]
+                pooled_log[f"pooled_val_mae_kidx{k}"]  = m["mae"]
+                pooled_log[f"pooled_val_rmse_kidx{k}"] = m["rmse"]
+        mlflow.log_metrics(pooled_log)
 
-        plot_predicted_vs_actual(
-            all_true, all_pred,
-            title=f"LOSO CV pooled ({n_folds} folds, N={len(all_true)})",
-            metrics=pooled,
-            artifact_subdir="predicted_vs_actual_pooled",
-        )
+        if k_factor > 1 and all_kidx is not None:
+            for k, m in pooled["per_kidx"].items():
+                mask = all_kidx == k
+                plot_predicted_vs_actual(
+                    all_true[mask], all_pred[mask],
+                    title=(f"LOSO CV pooled ({n_folds} folds, "
+                           f"phase k_idx={k}, N={int(mask.sum())})"),
+                    metrics=m,
+                    artifact_subdir="predicted_vs_actual_pooled",
+                    filename=f"kidx{k}.png",
+                )
+        else:
+            plot_predicted_vs_actual(
+                all_true, all_pred,
+                title=f"LOSO CV pooled ({n_folds} folds, N={len(all_true)})",
+                metrics=pooled,
+                artifact_subdir="predicted_vs_actual_pooled",
+            )
 
         # -----  Machine-parseable one-line summary (easy for autoresearch to grep)  -----
         print("\n" + "=" * 70)

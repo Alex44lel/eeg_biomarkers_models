@@ -43,7 +43,12 @@ import torch
 from mlflow.tracking import MlflowClient
 
 from .dataset import ALL_SUBJECTS, DATASET_PATHS, EEGDataset
-from .train_cv import compute_regression_metrics, run_fold, _resolve_kernels_strides
+from .train_cv import (
+    compute_regression_metrics,
+    polyphase_metrics,
+    run_fold,
+    _resolve_kernels_strides,
+)
 from .model import compute_rf, _DEFAULT_STRIDES
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -222,8 +227,11 @@ def main():
         all_seed_results = []
         # subject -> list of r² values (one per seed)
         per_subject_r2 = {s: [] for s in cv_subjects}
-        # rows for the big npz: (seed, subject, time, y_true, y_pred)
-        npz_seed, npz_subj, npz_time, npz_true, npz_pred = [], [], [], [], []
+        # rows for the big npz: (seed, subject, time, y_true, y_pred, k_idx)
+        # k_idx = -1 sentinel for non-polyphase datasets (so the column dtype
+        # stays integer regardless of dataset).
+        npz_seed, npz_subj, npz_time = [], [], []
+        npz_true, npz_pred, npz_kidx = [], [], []
 
         for seed_idx, seed in enumerate(args.seeds):
             set_seed(seed, device)
@@ -280,6 +288,10 @@ def main():
                     npz_time.extend(list(val_times))
                     npz_true.extend(list(res["y_true"]))
                     npz_pred.extend(list(res["y_pred"]))
+                    if res.get("k_idx") is not None:
+                        npz_kidx.extend([int(k) for k in res["k_idx"]])
+                    else:
+                        npz_kidx.extend([-1] * n)
 
                     print(f"  >>> seed {seed} fold {i}/{n_folds} ({subj}) in "
                           f"{time.time() - t_fold:.1f}s  "
@@ -291,7 +303,17 @@ def main():
                 rmses = np.array([r["best_val_rmse"] for r in fold_results])
                 y_true_all = np.concatenate([r["y_true"] for r in fold_results])
                 y_pred_all = np.concatenate([r["y_pred"] for r in fold_results])
-                pooled = compute_regression_metrics(y_true_all, y_pred_all)
+                # Polyphase-aware pooled (Q2=B): when k>1 the headline pooled
+                # R² is mean across phases of per-phase pooled R² (each phase
+                # pooled across every held-out subject), making it directly
+                # comparable to a non-polyphase baseline. The legacy
+                # "pool everything" version stays under *_pooled_all.
+                pool_kidx = None
+                if all(r.get("k_idx") is not None for r in fold_results):
+                    pool_kidx = np.concatenate(
+                        [r["k_idx"] for r in fold_results])
+                pooled = polyphase_metrics(y_true_all, y_pred_all, pool_kidx)
+                k_factor = fold_results[0].get("k_factor", 1)
 
                 seed_summary = {
                     "cv_mean_val_r2":  float(r2s.mean()),
@@ -304,6 +326,14 @@ def main():
                     "pooled_val_mae":  pooled["mae"],
                     "pooled_val_rmse": pooled["rmse"],
                 }
+                if k_factor > 1:
+                    seed_summary.update({
+                        "pooled_val_r2_pooled_all":   pooled["r2_pooled"],
+                        "pooled_val_mae_pooled_all":  pooled["mae_pooled"],
+                        "pooled_val_rmse_pooled_all": pooled["rmse_pooled"],
+                    })
+                    for k, m in pooled["per_kidx"].items():
+                        seed_summary[f"pooled_val_r2_kidx{k}"] = m["r2"]
                 mlflow.log_metrics(seed_summary)
 
                 # mirror seed aggregates onto parent for easy comparison
@@ -397,6 +427,7 @@ def main():
                 times=np.array(npz_time, dtype=np.float32),
                 y_true=np.array(npz_true, dtype=np.float32),
                 y_pred=np.array(npz_pred, dtype=np.float32),
+                k_idx=np.array(npz_kidx, dtype=np.int16),
             )
             mlflow.log_artifact(str(npz_path))
 
