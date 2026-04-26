@@ -51,6 +51,7 @@ desktop.ini
 
 data/
 mlruns/
+mlruns_cluster/
 results/
 # autoresearch local results (do not commit)
 src/models/reg_simpleCNN/results.tsv

@@ -75,6 +75,9 @@ def parse_args():
     p.add_argument("--mixup_alpha", type=float, default=0.0)
     p.add_argument("--kernels", type=int, nargs="+", default=None)
     p.add_argument("--strides", type=int, nargs="+", default=None)
+    p.add_argument("--channels", type=int, nargs="+", default=None,
+                   help="Channel width per block (e.g. --channels 96 192 384). "
+                        "Defaults to [64,128,256,...] from model.py.")
     p.add_argument("--k1", type=int, default=15)
     p.add_argument("--k2", type=int, default=7)
     p.add_argument("--k3", type=int, default=7)
@@ -213,6 +216,8 @@ def main():
         "strides": str(_resolve_kernels_strides(args)[1]),
         "n_blocks": len(_resolve_kernels_strides(args)[0]),
         "rf_ms": compute_rf(*_resolve_kernels_strides(args)),
+        "channels": (str(args.channels) if args.channels is not None
+                     else "default"),
         "use_se": not args.no_se,
         "early_stop": args.early_stop,
         "description": args.description,

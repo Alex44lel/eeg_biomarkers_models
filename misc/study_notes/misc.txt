@@ -167,6 +167,8 @@ plasma_sigma = pm.HalfCauchy("plasma_sigma", beta=50.0)  # prior 95% interval is
 --------------------------------------------------------------------------
 --------------------------------------------------------------------------
 
+mejor modelo por ahora (exp55)
+
 - bug: solventao, simplemente estaba juntando todos los points cada tres segundos en ved de dejar espacios
 
 - Graphormer no funciona, dejenera a predecir un valor
@@ -246,6 +248,7 @@ plasma DMT estimation" is a genuine contribution worth writing up.
 
 
 
+- probé otros convolutional pero el receptive field ya era bastante grande
 - AÑADIR plasma ground truth
 - SEED CV with latest conbination using: (DONE) -> exp55 still the best
   - full model
@@ -254,6 +257,7 @@ plasma DMT estimation" is a genuine contribution worth writing up.
   - only first to convs without SE
   - only first conv with SE
   - only first two convs without SE
+- probé otro patience
 
 -------------------------------------------------------
 -------------------------------------------------------

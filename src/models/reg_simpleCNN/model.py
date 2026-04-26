@@ -58,7 +58,8 @@ class SimpleCNN(nn.Module):
     """
 
     def __init__(self, in_channels=32, dropout=0.3,
-                 kernels=(15, 7, 7), strides=None, use_se=True):
+                 kernels=(15, 7, 7), strides=None, use_se=True,
+                 channels=None):
         n = len(kernels)
         assert 1 <= n <= 7, "kernels must have 1–7 elements"
         super().__init__()
@@ -67,7 +68,10 @@ class SimpleCNN(nn.Module):
         strides = list(strides) if strides is not None else _DEFAULT_STRIDES[:n]
         assert len(strides) == n, "kernels and strides must have the same length"
 
-        channels = _BLOCK_CHANNELS[:n]
+        channels = list(channels) if channels is not None else _BLOCK_CHANNELS[:n]
+        assert len(channels) == n, (
+            f"channels must have the same length as kernels (got {len(channels)} vs {n})"
+        )
         ch_in = in_channels
         for i, (k, s, ch_out) in enumerate(zip(kernels, strides, channels), start=1):
             setattr(self, f"block{i}", nn.Sequential(

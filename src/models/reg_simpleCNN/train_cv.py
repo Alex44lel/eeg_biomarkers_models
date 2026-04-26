@@ -99,6 +99,10 @@ def parse_args():
     p.add_argument("--strides", type=int, nargs="+", default=None,
                    help="Strides per block, e.g. --strides 8 4 4. "
                         "Defaults to [8,4,4,2,2,2,2][:n_blocks] if not set.")
+    p.add_argument("--channels", type=int, nargs="+", default=None,
+                   help="Channel width per block, e.g. --channels 96 192 384. "
+                        "Defaults to [64,128,256,256,256,256,256][:n_blocks]. "
+                        "Used to test capacity confounds at fixed RF.")
     # Legacy interface kept for backward compatibility
     p.add_argument("--k1", type=int, default=15)
     p.add_argument("--k2", type=int, default=7)
@@ -436,15 +440,19 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
 
     use_se = not args.no_se
     kernels, strides = _resolve_kernels_strides(args)
+    channels = getattr(args, "channels", None)
     rf_samples = compute_rf(kernels, strides)
     model = SimpleCNN(in_channels=train_ds.n_channels, dropout=args.dropout,
-                      kernels=kernels, strides=strides, use_se=use_se).to(device)
+                      kernels=kernels, strides=strides, use_se=use_se,
+                      channels=channels).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {n_params:,}  |  RF = {rf_samples}ms @ 1kHz  |  "
-          f"n_blocks={len(kernels)}  kernels={kernels}  strides={strides}  SE={use_se}")
+          f"n_blocks={len(kernels)}  kernels={kernels}  strides={strides}  "
+          f"channels={channels or 'default'}  SE={use_se}")
 
     ema_model = SimpleCNN(in_channels=train_ds.n_channels, dropout=args.dropout,
-                          kernels=kernels, strides=strides, use_se=use_se).to(device)
+                          kernels=kernels, strides=strides, use_se=use_se,
+                          channels=channels).to(device)
     ema_model.load_state_dict(model.state_dict())
     for p in ema_model.parameters():
         p.requires_grad_(False)
@@ -474,6 +482,7 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
         "rf_ms": rf_samples,
         "use_se": use_se,
         "early_stop": args.early_stop,
+        "channels": str(channels) if channels is not None else "default",
     })
 
     best_val_r2 = -float("inf")
