@@ -44,13 +44,16 @@ def polyphase_split(eeg, k):
     """Split eeg of shape (N, C, L) into K polyphase views.
 
     Returns an array of shape (K * N, C, L // K). The K copies of trial n
-    are at rows [k_idx * N + n for k_idx in range(K)] (k_idx-major order
-    is more cache-friendly when downstream code iterates k_idx in the
-    outer loop, but we use trial-major below to keep the k=1 case
-    indistinguishable from the source).
+    are at rows [k_idx * N + n for k_idx in range(K)]
+
+    row 0:  trial 0, phase 0
+    row 1:  trial 0, phase 1
+    ...
+    row M-1: trial 0, phase K-1
+    row M:   trial 1, phase 0
     """
     n, c, l = eeg.shape
-    l_ds = l // k
+    l_ds = l // k  # lenght after decimation
     # Trial-major output: rows are [(trial 0, k=0), (trial 0, k=1), ...,
     # (trial 0, k=K-1), (trial 1, k=0), ...]. This way trial t occupies
     # rows [t*K : (t+1)*K] which makes leakage checks simple.
@@ -60,6 +63,7 @@ def polyphase_split(eeg, k):
         # so all K sub-signals are the same length (drops at most K-1
         # tail samples from phases with longer slices).
         out[i::k] = eeg[:, :, i:i + k * l_ds:k]
+        # out[i::k], (start:stop:step)
     return out
 
 
@@ -117,7 +121,7 @@ def sanity_check(src_eeg, src_labels, src_times, src_subjects, fields, k):
     orig_id = fields["orig_trial_id"]
 
     # 1. Counts
-    assert eeg.shape[0] == k * n_orig, f"row count mismatch: {eeg.shape[0]} vs {k*n_orig}"
+    assert eeg.shape[0] == k * n_orig, f"row count mismatch: {eeg.shape[0]} vs {k * n_orig}"
     assert eeg.shape[1] == src_eeg.shape[1], "channel count changed"
     assert eeg.shape[2] == src_eeg.shape[2] // k, "downsampled length wrong"
     assert labels.shape == (k * n_orig,)

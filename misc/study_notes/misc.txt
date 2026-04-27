@@ -280,8 +280,9 @@ c- runnear mejores exp con stopping based on MAE
 
 
 -------------------------------------------------------
-- subject alignment
-- hablar con george (DONE)
+- probamos a meter filtros
+- subject alignment ()
+- hablar con george (DONE- hoy a las 16)
 - probar con el brain
 - https://pubmed.ncbi.nlm.nih.gov/39914006/
  
