@@ -249,6 +249,7 @@ plasma DMT estimation" is a genuine contribution worth writing up.
 
 
 - probé otros convolutional pero el receptive field ya era bastante grande
+  RFn​=RFn−1​+(kn​−1)×i=1∏n−1​si​
 - AÑADIR plasma ground truth
 - SEED CV with latest conbination using: (DONE) -> exp55 still the best
   - full model
@@ -257,25 +258,33 @@ plasma DMT estimation" is a genuine contribution worth writing up.
   - only first to convs without SE
   - only first conv with SE
   - only first two convs without SE
-- probé otro patience
+c- runnear mejores exp con stopping based on MAE
+
 
 -------------------------------------------------------
 -------------------------------------------------------
-- runnear mejores exp con stopping based on MAE
 
 - donwsamplear el egg  (parametro) (DEJAR ESTO RUNNEANDO EN EL CLUSTER)
   - partir la señal en k 
   - data augmentation
 
+- ver apr26_capacity_sweep_table para resultados
+- con K2 (500hz) conseguimos un modelo mejor y con menos parametros
+- aún así podemos conseguir lo mismo con k=1 si subimos los channels
+- el modelo con k=2 tbm tiene menos standard deviation
+
+- the polyphase split takes every Kth sample with no anti-alias filter
+- frequencies above the new Nyquist (100 Hz  at k=5, 50 Hz at k=10) fold back into the kept bands and corrupt the EEG 
+- should we do a low-pass filter before decimating?
+
+
+
+-------------------------------------------------------
 - subject alignment
-
-
 - hablar con george (DONE)
 - probar con el brain
 - https://pubmed.ncbi.nlm.nih.gov/39914006/
-- 
-
-- 
+ 
 
 
 
