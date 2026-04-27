@@ -29,6 +29,15 @@ DATASET_PATHS = {
     "pk_k4":  PROJECT_ROOT / "data" / "eeg_dmt_regression_k4.npz",
     "pk_k5":  PROJECT_ROOT / "data" / "eeg_dmt_regression_k5.npz",
     "pk_k10": PROJECT_ROOT / "data" / "eeg_dmt_regression_k10.npz",
+    # Anti-aliased polyphase variants (filter-then-decimate, see
+    # build_downsampled_dataset_filt.py). Schema identical to pk_k{K}; only
+    # difference is an FIR low-pass applied before each phase is taken,
+    # eliminating aliasing of >Nyquist content into the kept bands. Use
+    # these to test whether the k=5/k=10 collapse on the unfiltered builds
+    # was caused by aliasing or by genuine info loss.
+    "pk_k2_filt":  PROJECT_ROOT / "data" / "eeg_dmt_regression_k2_filt.npz",
+    "pk_k5_filt":  PROJECT_ROOT / "data" / "eeg_dmt_regression_k5_filt.npz",
+    "pk_k10_filt": PROJECT_ROOT / "data" / "eeg_dmt_regression_k10_filt.npz",
 }
 
 # Subjects with PK posterior-mean y1 labels (matches reg_graphTrip / build_dmt_dataset.py)
