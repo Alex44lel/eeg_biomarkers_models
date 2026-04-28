@@ -91,6 +91,11 @@ def parse_args():
                    choices=sorted(DATASET_PATHS.keys()))
     p.add_argument("--data_path", type=str, default=None,
                    help="Optional explicit npz path (overrides --dataset).")
+    p.add_argument("--single_phase", action="store_true",
+                   help="On polyphase datasets (pk_kN), keep only k_idx==0 so "
+                        "each parent window contributes one decimated row "
+                        "instead of K. Makes the run structurally equivalent "
+                        "to a non-polyphase k=1 baseline at the lower rate.")
     p.add_argument("--experiment_name", type=str,
                    default="SimpleCNN_DMT_regression_CV")
     p.add_argument("--run_name", type=str, default="multiseed_apr19_best")
@@ -206,6 +211,7 @@ def main():
         "early_stop_direction": "maximize",
         "dataset": args.dataset,
         "data_path": args.data_path or "",
+        "single_phase": bool(args.single_phase),
         "loss": args.loss,
         "huber_beta": args.huber_beta,
         "mixup_alpha": args.mixup_alpha,
@@ -287,7 +293,8 @@ def main():
                     n = len(res["y_true"])
                     val_times = EEGDataset(subjects=[subj],
                                            dataset=args.dataset,
-                                           data_path=args.data_path).times
+                                           data_path=args.data_path,
+                                           single_phase=args.single_phase).times
                     npz_seed.extend([seed] * n)
                     npz_subj.extend([subj] * n)
                     npz_time.extend(list(val_times))

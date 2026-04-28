@@ -77,7 +77,7 @@ class EEGDataset(Dataset):
     """
 
     def __init__(self, data_path=None, subjects=None, normalize=True,
-                 dataset=None):
+                 dataset=None, single_phase=False):
         data_path = resolve_dataset_path(dataset=dataset, data_path=data_path)
         ds = np.load(data_path, allow_pickle=True)
 
@@ -103,6 +103,21 @@ class EEGDataset(Dataset):
                 all_k_idx = all_k_idx[mask]
             if all_orig_id is not None:
                 all_orig_id = all_orig_id[mask]
+
+        # Drop all polyphase phases except phase 0. Each parent window then
+        # contributes exactly one decimated row (length 3000//K), making the
+        # dataset structurally equivalent to a non-polyphase k=1 build at the
+        # lower sampling rate — no phase-repetition "augmentation". Triggering
+        # this on a non-polyphase dataset is a no-op.
+        if single_phase and all_k_idx is not None:
+            mask = all_k_idx == 0
+            all_eeg = all_eeg[mask]
+            all_labels = all_labels[mask]
+            all_subjects = all_subjects[mask]
+            all_times = all_times[mask]
+            all_k_idx = None
+            all_orig_id = None
+            self.k_factor = 1
 
         # Convert to float32
         all_eeg = all_eeg.astype(np.float32)

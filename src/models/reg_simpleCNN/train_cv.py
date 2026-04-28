@@ -127,6 +127,11 @@ def parse_args():
                         "polyphase-downsampled variants pk_k2 / pk_k3 / pk_k4.")
     p.add_argument("--data_path", type=str, default=None,
                    help="Optional explicit npz path (overrides --dataset).")
+    p.add_argument("--single_phase", action="store_true",
+                   help="On polyphase datasets (pk_kN), keep only k_idx==0 so "
+                        "each parent window contributes one decimated row "
+                        "instead of K. Makes the run structurally equivalent "
+                        "to a non-polyphase k=1 baseline at the lower rate.")
     p.add_argument("--experiment_name", type=str,
                    default="SimpleCNN_DMT_regression_CV")
     p.add_argument("--run_name", type=str, default=None)
@@ -390,10 +395,11 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
     print(f"Val subject:                 {val_subject}")
 
     data_path = getattr(args, "data_path", None)
+    single_phase = getattr(args, "single_phase", False)
     train_ds = EEGDataset(subjects=train_subjects, dataset=args.dataset,
-                          data_path=data_path)
+                          data_path=data_path, single_phase=single_phase)
     val_ds = EEGDataset(subjects=[val_subject], dataset=args.dataset,
-                        data_path=data_path)
+                        data_path=data_path, single_phase=single_phase)
 
     # Sanity: train/val subject sets must be disjoint, and if the dataset
     # carries polyphase metadata every orig_trial_id must live entirely on

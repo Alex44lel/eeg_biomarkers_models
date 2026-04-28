@@ -1,0 +1,34 @@
+#!/bin/bash
+#SBATCH --job-name=apr28_sp_def
+#SBATCH --gres=gpu:1
+#SBATCH --partition=a30
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH --time=12:00:00
+#SBATCH --output=/vol/bitbucket/ac5725/eeg_biomarkers_models/logs/slurm-%j.out
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=alejandroch2011@gmail.com
+
+# apr28 SINGLE-PHASE polyphase sweep — DEFAULT channels (64/128/256).
+# 4 multiseed runs at k=2, 3, 4, 5 on the unfiltered pk_kN datasets,
+# keeping only k_idx==0 of each parent window (--single_phase).
+#
+# Each run uses the same parent-window count as the k=1 baseline, so wall
+# time per run is ~30–90 min (decimated signals: L = 3000//k). 12h is a
+# generous margin for the 4-run sweep.
+#
+# Companion job: cluster_apr28_singlephase_wide.sh runs the same 4 k's at
+# wide channels (96/192/384). The two jobs together fill the full 4×2 grid.
+
+export PATH=/vol/bitbucket/${USER}/eeg_biomarkers_models/env/bin/:$PATH
+source activate
+. /vol/cuda/12.0.0/setup.sh
+export MPLBACKEND=Agg
+export MPLCONFIGDIR=/tmp/matplotlib-${SLURM_JOB_ID}
+export MLFLOW_TRACKING_URI=file:///vol/bitbucket/ac5725/eeg_biomarkers_models/mlruns
+
+nvidia-smi
+
+cd /vol/bitbucket/ac5725/eeg_biomarkers_models
+
+bash src/models/reg_simpleCNN/shell_and_logs/run_apr28_singlephase_sweep.sh default
