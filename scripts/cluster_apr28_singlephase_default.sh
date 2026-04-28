@@ -4,7 +4,7 @@
 #SBATCH --partition=a30
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=12:00:00
+#SBATCH --time=16:00:00
 #SBATCH --output=/vol/bitbucket/ac5725/eeg_biomarkers_models/logs/slurm-%j.out
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=alejandroch2011@gmail.com
