@@ -19,13 +19,18 @@ LOCAL_PATH="$HOME/Desktop/tfm_code/mlruns_cluster"
 mkdir -p "$LOCAL_PATH"
 
 echo "==> rsync ${REMOTE_HOST}:${REMOTE_PATH}/ -> ${LOCAL_PATH}/"
-rsync -avz --info=progress2 \
+rsync -avz --info=progress2,stats2 --human-readable \
     "${REMOTE_HOST}:${REMOTE_PATH}/" \
     "${LOCAL_PATH}/"
 
 echo "==> rewriting artifact paths in meta.yaml files"
-find "$LOCAL_PATH" -name meta.yaml -exec \
-    sed -i "s|${REMOTE_PATH}|${LOCAL_PATH}|g" {} +
+mapfile -t META_FILES < <(find "$LOCAL_PATH" -name meta.yaml)
+TOTAL=${#META_FILES[@]}
+for i in "${!META_FILES[@]}"; do
+    sed -i "s|${REMOTE_PATH}|${LOCAL_PATH}|g" "${META_FILES[$i]}"
+    printf "\r    [%d/%d] (%d%%)" "$((i + 1))" "$TOTAL" "$(( (i + 1) * 100 / TOTAL ))"
+done
+echo ""
 
 echo ""
 echo "Done. View the runs locally with:"
