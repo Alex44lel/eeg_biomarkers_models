@@ -79,6 +79,14 @@ def _build_model(args, in_channels, signal_length, use_baseline):
         # `signal_length` is `feature_dim` for bandpower datasets (set in
         # EEGDataset when bandpower_features=True). The hidden width comes
         # from the optional --bandpower_hidden flag; None = literal linear.
+        #
+        # NOTE: model_info here intentionally omits CNN-shaped keys
+        # (kernels/strides/n_blocks/rf_*/channels/use_se). multiseed_cv and
+        # train_cv standalone already log those on the parent / seed runs
+        # for backward compat, and bandpower_linear has no real values for
+        # them — emitting "n/a" placeholders here would collide with the
+        # parent's "default" / use_se=True values on the per-fold child run
+        # ("Changing param values is not allowed.").
         n_features = int(signal_length)
         hidden = getattr(args, "bandpower_hidden", None)
         model = BandPowerLinear(
@@ -93,14 +101,6 @@ def _build_model(args, in_channels, signal_length, use_baseline):
             "bandpower_zscore": not getattr(args, "bandpower_no_feature_zscore", False),
             "bandpower_welch_nperseg": getattr(args, "bandpower_welch_nperseg", 512),
             "bandpower_hidden": hidden if hidden is not None else "linear",
-            # legacy mlflow keys so dashboards keyed on these don't break
-            "kernels": "n/a (bandpower)",
-            "strides": "n/a (bandpower)",
-            "n_blocks": (2 if hidden is not None else 1),
-            "rf_samples": n_features,
-            "rf_ms": n_features,
-            "channels": "n/a (bandpower)",
-            "use_se": False,
         }
         return model, info
 
