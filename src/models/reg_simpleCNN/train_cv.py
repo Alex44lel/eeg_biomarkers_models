@@ -34,7 +34,7 @@ import mlflow.pytorch
 from mlflow.tracking import MlflowClient
 
 from .model import SimpleCNN, compute_rf, _DEFAULT_STRIDES
-from .model_spectral import SpectralCNN
+from .model_spectral import SpectralCNN, BandPowerLinear
 from .dataset import EEGDataset, ALL_SUBJECTS, DATASET_PATHS, SUBJECT_TO_IDX
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -72,6 +72,35 @@ def _build_model(args, in_channels, signal_length, use_baseline):
             "rf_ms": rf_samples,
             "channels": (str(channels) if channels is not None else "default"),
             "use_se": use_se,
+        }
+        return model, info
+
+    if model_kind == "bandpower_linear":
+        # `signal_length` is `feature_dim` for bandpower datasets (set in
+        # EEGDataset when bandpower_features=True). The hidden width comes
+        # from the optional --bandpower_hidden flag; None = literal linear.
+        n_features = int(signal_length)
+        hidden = getattr(args, "bandpower_hidden", None)
+        model = BandPowerLinear(
+            n_features=n_features, dropout=args.dropout, hidden=hidden,
+            use_baseline_subtraction=use_baseline,
+        )
+        info = {
+            "model": "bandpower_linear",
+            "n_features": n_features,
+            "bandpower_bands": getattr(args, "bandpower_bands", None) or "default(6)",
+            "bandpower_log": not getattr(args, "bandpower_no_log", False),
+            "bandpower_zscore": not getattr(args, "bandpower_no_feature_zscore", False),
+            "bandpower_welch_nperseg": getattr(args, "bandpower_welch_nperseg", 512),
+            "bandpower_hidden": hidden if hidden is not None else "linear",
+            # legacy mlflow keys so dashboards keyed on these don't break
+            "kernels": "n/a (bandpower)",
+            "strides": "n/a (bandpower)",
+            "n_blocks": (2 if hidden is not None else 1),
+            "rf_samples": n_features,
+            "rf_ms": n_features,
+            "channels": "n/a (bandpower)",
+            "use_se": False,
         }
         return model, info
 
@@ -222,10 +251,12 @@ def parse_args():
     # Model selection — defaults to SimpleCNN. SpectralCNN replaces the first
     # temporal convs with a fixed STFT frontend; see model_spectral.py.
     p.add_argument("--model", type=str, default="simplecnn",
-                   choices=["simplecnn", "spectral_cnn"],
+                   choices=["simplecnn", "spectral_cnn", "bandpower_linear"],
                    help="Backbone choice. 'simplecnn' is the apr19 1D-conv "
                         "baseline; 'spectral_cnn' uses an STFT frontend + 2D "
-                        "conv backbone (apr29 MVP).")
+                        "conv backbone (apr29 MVP); 'bandpower_linear' is "
+                        "the paper-style Linear/MLP head on Welch band-power "
+                        "features (apr29 alt MVP).")
     p.add_argument("--n_fft", type=int, default=256,
                    help="STFT n_fft for --model spectral_cnn (ignored otherwise).")
     p.add_argument("--hop_length", type=int, default=32,
@@ -236,7 +267,37 @@ def parse_args():
                    help="Exponent on |STFT|. 1=magnitude, 2=power.")
     p.add_argument("--spectral_no_log", action="store_true",
                    help="Disable log compression of |STFT|^p.")
+    # bandpower_linear-specific flags. Ignored for other backbones.
+    p.add_argument("--bandpower_bands", type=str, default=None,
+                   help="Space-separated 'lo-hi' Hz pairs, e.g. "
+                        "'1-4 4-8 8-13 13-30 30-45 45-100'. "
+                        "Defaults to dataset.DEFAULT_BANDPOWER_BANDS (6 bands).")
+    p.add_argument("--bandpower_no_log", action="store_true",
+                   help="Disable log(eps + power) compression of band powers.")
+    p.add_argument("--bandpower_no_feature_zscore", action="store_true",
+                   help="Disable train-fit per-feature z-score (paper does not "
+                        "z-score, but the linear head trains better with it).")
+    p.add_argument("--bandpower_welch_nperseg", type=int, default=512,
+                   help="Welch segment length. Auto-clipped to trial length L.")
+    p.add_argument("--bandpower_hidden", type=int, default=None,
+                   help="If set, --model bandpower_linear becomes a 1-hidden-"
+                        "layer MLP with this width. None = literal linear head.")
     return p.parse_args()
+
+
+def _parse_bands(spec):
+    """Parse a '1-4 4-8 8-13' string into [(1.0, 4.0), (4.0, 8.0), ...].
+    Returns None when spec is None so the caller falls back to the dataset
+    default."""
+    if spec is None:
+        return None
+    out = []
+    for tok in spec.split():
+        if "-" not in tok:
+            raise ValueError(f"--bandpower_bands token {tok!r} missing '-'")
+        lo, hi = tok.split("-", 1)
+        out.append((float(lo), float(hi)))
+    return out
 
 
 def compute_regression_metrics(y_true, y_pred):
@@ -540,18 +601,44 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
     data_path = getattr(args, "data_path", None)
     single_phase = getattr(args, "single_phase", False)
     use_baseline = getattr(args, "baseline_subtraction", False)
+
+    # Bandpower-features path: lazy Welch features inside EEGDataset, with
+    # train-fit z-score statistics threaded into val to avoid leakage.
+    bandpower = getattr(args, "model", "simplecnn") == "bandpower_linear"
+    bp_kwargs = {}
+    if bandpower:
+        bp_kwargs = dict(
+            bandpower_features=True,
+            bandpower_bands=_parse_bands(getattr(args, "bandpower_bands", None)),
+            bandpower_log=not getattr(args, "bandpower_no_log", False),
+            bandpower_zscore_features=
+                not getattr(args, "bandpower_no_feature_zscore", False),
+            bandpower_welch_nperseg=
+                getattr(args, "bandpower_welch_nperseg", 512),
+        )
+
     train_ds = EEGDataset(subjects=train_subjects, dataset=args.dataset,
                           data_path=data_path, single_phase=single_phase,
-                          load_baseline=use_baseline)
+                          load_baseline=use_baseline, **bp_kwargs)
+    if bandpower:
+        # Inherit train-fit per-feature mean/std for val so the scaler does
+        # not leak across the LOSO split.
+        bp_kwargs["bandpower_norm_stats"] = train_ds.bandpower_norm_stats
     val_ds = EEGDataset(subjects=[val_subject], dataset=args.dataset,
                         data_path=data_path, single_phase=single_phase,
-                        load_baseline=use_baseline)
+                        load_baseline=use_baseline, **bp_kwargs)
     if use_baseline:
         n_train_b = sum(t.shape[0] for t in train_ds.baseline_eeg.values())
         n_val_b = sum(t.shape[0] for t in val_ds.baseline_eeg.values())
         print(f"Baseline buffers: train={n_train_b} trials across "
               f"{len(train_ds.baseline_eeg)} subjects, "
               f"val={n_val_b} trials for {val_subject}")
+    if bandpower:
+        meta = train_ds._bandpower_meta
+        print(f"Bandpower features: F={train_ds.feature_dim}  "
+              f"({meta['n_channels']}ch × {meta['n_bands']} bands)  "
+              f"fs={meta['fs']:.1f} Hz  nperseg={meta['nperseg']}  "
+              f"log={meta['log']}  z-score={'on' if train_ds.bandpower_norm_stats else 'off'}")
 
     # Sanity: train/val subject sets must be disjoint, and if the dataset
     # carries polyphase metadata every orig_trial_id must live entirely on

@@ -194,3 +194,60 @@ class SpectralCNN(nn.Module):
         if self.use_baseline_subtraction and mu_s is not None:
             feat = feat - self.baseline_lambda * mu_s
         return self.regressor(feat).squeeze(-1)
+
+
+class BandPowerLinear(nn.Module):
+    """Paper-style linear (or small MLP) head on per-trial band-power features.
+
+    The features are pre-computed by the dataset (EEGDataset with
+    `bandpower_features=True`): for each trial of shape (32, L) the dataset
+    runs Welch PSD per channel, integrates over a fixed list of frequency
+    bands, optionally log-compresses and z-scores → flat vector of length
+    `n_features = n_channels * n_bands`.
+
+    `extract_features` is the identity (the network does not extract
+    anything beyond the dataset features). The forward path is
+
+        feat = x
+        feat -= λ · mu_s                           # if subject adaptation on
+        y    = head(feat)
+
+    where `head` is a single Linear (literal paper) when `hidden=None`, or a
+    one-hidden-layer MLP (`Linear → ReLU → Dropout → Linear`) otherwise. λ
+    is a learnable scalar, init=1.0; mu_s is the per-subject mean
+    pre-injection feature vector (computed externally each epoch via the
+    same `compute_mu_s_table` helper used by SimpleCNN / SpectralCNN).
+
+    Same external interface as the other two models — exposes `feature_dim`,
+    `extract_features`, `forward(x, mu_s=None)`, and an optional
+    `baseline_lambda` — so train_cv.run_fold can swap models with a factory.
+    """
+
+    def __init__(self, n_features, dropout=0.3, hidden=None,
+                 use_baseline_subtraction=False):
+        super().__init__()
+        self.feature_dim = int(n_features)
+        if hidden is None:
+            self.head = nn.Linear(self.feature_dim, 1)
+        else:
+            self.head = nn.Sequential(
+                nn.Linear(self.feature_dim, int(hidden)),
+                nn.ReLU(inplace=True),
+                nn.Dropout(dropout),
+                nn.Linear(int(hidden), 1),
+            )
+        self.use_baseline_subtraction = bool(use_baseline_subtraction)
+        if self.use_baseline_subtraction:
+            self.baseline_lambda = nn.Parameter(torch.ones(1))
+
+    def extract_features(self, x):
+        # The dataset already produces the feature vector; identity here
+        # keeps `compute_mu_s_table(model.extract_features(x_baseline))`
+        # working unchanged.
+        return x
+
+    def forward(self, x, mu_s=None):
+        feat = x
+        if self.use_baseline_subtraction and mu_s is not None:
+            feat = feat - self.baseline_lambda * mu_s
+        return self.head(feat).squeeze(-1)

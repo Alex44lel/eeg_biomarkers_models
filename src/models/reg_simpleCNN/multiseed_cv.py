@@ -103,13 +103,19 @@ def parse_args():
     p.add_argument("--baseline_subtraction", action="store_true",
                    help="Linear subject adaptation (see train_cv.py).")
     p.add_argument("--model", type=str, default="simplecnn",
-                   choices=["simplecnn", "spectral_cnn"],
+                   choices=["simplecnn", "spectral_cnn", "bandpower_linear"],
                    help="Backbone choice — see train_cv.py / model_spectral.py.")
     p.add_argument("--n_fft", type=int, default=256)
     p.add_argument("--hop_length", type=int, default=32)
     p.add_argument("--f_max", type=float, default=100.0)
     p.add_argument("--spectral_power", type=float, default=2.0)
     p.add_argument("--spectral_no_log", action="store_true")
+    # Bandpower-linear flags (passed through to train_cv.run_fold).
+    p.add_argument("--bandpower_bands", type=str, default=None)
+    p.add_argument("--bandpower_no_log", action="store_true")
+    p.add_argument("--bandpower_no_feature_zscore", action="store_true")
+    p.add_argument("--bandpower_welch_nperseg", type=int, default=512)
+    p.add_argument("--bandpower_hidden", type=int, default=None)
     return p.parse_args()
 
 
@@ -244,13 +250,23 @@ def main():
             "n_blocks": len(kernels),
             "rf_ms": compute_rf(kernels, strides),
         })
-    else:
+    elif args.model == "spectral_cnn":
         shared_hparams.update({
             "n_fft": args.n_fft,
             "hop_length": args.hop_length,
             "f_max": args.f_max,
             "spectral_power": args.spectral_power,
             "spectral_log": (not args.spectral_no_log),
+        })
+    elif args.model == "bandpower_linear":
+        shared_hparams.update({
+            "bandpower_bands": (args.bandpower_bands or "default(6)"),
+            "bandpower_log": (not args.bandpower_no_log),
+            "bandpower_zscore": (not args.bandpower_no_feature_zscore),
+            "bandpower_welch_nperseg": args.bandpower_welch_nperseg,
+            "bandpower_hidden": (args.bandpower_hidden
+                                 if args.bandpower_hidden is not None
+                                 else "linear"),
         })
 
     with mlflow.start_run(run_name=args.run_name) as parent_run:

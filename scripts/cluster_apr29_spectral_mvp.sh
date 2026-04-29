@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=apr29_spectral
 #SBATCH --gres=gpu:1
-#SBATCH --partition=a30
+#SBATCH --partition=a100
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=24:00:00
