@@ -92,7 +92,7 @@ def plot_latent_space(model, train_loader, val_loader, val_subjects, device):
 
     all_feats, all_labels, all_splits = [], [], []
     for split_name, loader in [("train", train_loader), ("val", val_loader)]:
-        for X, y in loader:
+        for X, y, _ in loader:  # subject_idx unused here
             feats = model.extract_features(X.to(device)).cpu().numpy()
             all_feats.append(feats)
             all_labels.append(y.numpy())
@@ -147,7 +147,7 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
     all_preds, all_labels = [], []
     n_samples = 0
 
-    for X, y in loader:
+    for X, y, _ in loader:
         X, y = X.to(device), y.to(device)
         optimizer.zero_grad()
         preds = model(X)
@@ -174,7 +174,7 @@ def evaluate(model, loader, criterion, device):
     all_preds, all_labels = [], []
     n_samples = 0
 
-    for X, y in loader:
+    for X, y, _ in loader:
         X, y = X.to(device), y.to(device)
         preds = model(X)
         loss = criterion(preds, y)

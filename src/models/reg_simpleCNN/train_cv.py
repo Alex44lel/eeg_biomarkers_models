@@ -34,9 +34,85 @@ import mlflow.pytorch
 from mlflow.tracking import MlflowClient
 
 from .model import SimpleCNN, compute_rf, _DEFAULT_STRIDES
-from .dataset import EEGDataset, ALL_SUBJECTS, DATASET_PATHS
+from .model_spectral import SpectralCNN
+from .dataset import EEGDataset, ALL_SUBJECTS, DATASET_PATHS, SUBJECT_TO_IDX
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _build_model(args, in_channels, signal_length, use_baseline):
+    """Construct a fresh model from `args`. Returns (model, info_dict).
+
+    `info_dict` carries the params worth logging on each fold (kernels,
+    channels, RF, spectral hparams, etc.). Two backbones are supported:
+
+    - simplecnn (default)        — 1D conv stack, see model.SimpleCNN.
+    - spectral_cnn (apr29 MVP)   — STFT frontend + 2D conv backbone,
+                                    see model_spectral.SpectralCNN.
+
+    The returned model exposes `feature_dim` and `extract_features(x)` so it
+    is interchangeable downstream (mu_s table, EMA, baseline subtraction).
+    """
+    model_kind = getattr(args, "model", "simplecnn")
+    if model_kind == "simplecnn":
+        kernels, strides = _resolve_kernels_strides(args)
+        channels = getattr(args, "channels", None)
+        use_se = not args.no_se
+        rf_samples = compute_rf(kernels, strides)
+        model = SimpleCNN(in_channels=in_channels, dropout=args.dropout,
+                          kernels=kernels, strides=strides, use_se=use_se,
+                          channels=channels,
+                          use_baseline_subtraction=use_baseline)
+        info = {
+            "model": "simplecnn",
+            "kernels": str(kernels),
+            "strides": str(strides),
+            "n_blocks": len(kernels),
+            "rf_samples": rf_samples,
+            "rf_ms": rf_samples,
+            "channels": (str(channels) if channels is not None else "default"),
+            "use_se": use_se,
+        }
+        return model, info
+
+    if model_kind == "spectral_cnn":
+        # Pick fs from signal_length: the npz files always span 3 s, so
+        # fs = signal_length / 3. (k=1 → 1000 Hz, k=2 → 500 Hz, k=3 → 333 Hz.)
+        fs = float(signal_length) / 3.0
+        channels = getattr(args, "channels", None) or [64, 128, 256]
+        use_se = not args.no_se
+        model = SpectralCNN(
+            in_channels=in_channels, dropout=args.dropout,
+            channels=tuple(channels), use_se=use_se,
+            n_fft=args.n_fft, hop_length=args.hop_length,
+            fs=fs, f_max=args.f_max,
+            spectral_power=args.spectral_power,
+            spectral_log=not getattr(args, "spectral_no_log", False),
+            use_baseline_subtraction=use_baseline,
+        )
+        f_bins, t_frames = model.frontend.output_shape(signal_length)
+        info = {
+            "model": "spectral_cnn",
+            "n_fft": args.n_fft,
+            "hop_length": args.hop_length,
+            "fs": fs,
+            "f_max": args.f_max,
+            "spectral_power": args.spectral_power,
+            "spectral_log": not getattr(args, "spectral_no_log", False),
+            "spec_F": f_bins,
+            "spec_T": t_frames,
+            "channels": str(channels),
+            "use_se": use_se,
+            # for legacy mlflow filters that key on these:
+            "kernels": "n/a (spectral)",
+            "strides": "n/a (spectral)",
+            "n_blocks": 3,
+            "rf_samples": int(args.n_fft),
+            "rf_ms": int(round(args.n_fft * 1000.0 / fs)),
+        }
+        return model, info
+
+    raise ValueError(f"Unknown --model {model_kind!r}")
 
 
 def _resolve_kernels_strides(args):
@@ -138,6 +214,28 @@ def parse_args():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--log_model", action="store_true",
                    help="If set, also log each fold's best PyTorch model to MLflow")
+    p.add_argument("--baseline_subtraction", action="store_true",
+                   help="Enable linear subject adaptation: subtract a learnable "
+                        "scalar λ times each subject's mean pre-injection feature "
+                        "vector from the post-pool features before the regressor. "
+                        "Requires the dataset to be built with --include-baseline.")
+    # Model selection — defaults to SimpleCNN. SpectralCNN replaces the first
+    # temporal convs with a fixed STFT frontend; see model_spectral.py.
+    p.add_argument("--model", type=str, default="simplecnn",
+                   choices=["simplecnn", "spectral_cnn"],
+                   help="Backbone choice. 'simplecnn' is the apr19 1D-conv "
+                        "baseline; 'spectral_cnn' uses an STFT frontend + 2D "
+                        "conv backbone (apr29 MVP).")
+    p.add_argument("--n_fft", type=int, default=256,
+                   help="STFT n_fft for --model spectral_cnn (ignored otherwise).")
+    p.add_argument("--hop_length", type=int, default=32,
+                   help="STFT hop_length for --model spectral_cnn.")
+    p.add_argument("--f_max", type=float, default=100.0,
+                   help="Spectral cutoff in Hz; bins above are dropped.")
+    p.add_argument("--spectral_power", type=float, default=2.0,
+                   help="Exponent on |STFT|. 1=magnitude, 2=power.")
+    p.add_argument("--spectral_no_log", action="store_true",
+                   help="Disable log compression of |STFT|^p.")
     return p.parse_args()
 
 
@@ -192,6 +290,31 @@ def polyphase_metrics(y_true, y_pred, k_idx):
     return out
 
 
+@torch.no_grad()
+def compute_mu_s_table(model, baseline_dict, device, n_subjects, feature_dim):
+    """Refresh per-subject mean pre-injection features.
+
+    For each subject in `baseline_dict` (subj_id -> tensor of shape
+    (N_baseline, C, L)), forwards the trials through `model.extract_features`
+    in eval mode and stores the per-feature mean at row SUBJECT_TO_IDX[subj].
+    Subjects absent from `baseline_dict` keep a zero row — those rows must
+    not be indexed by the gather step.
+
+    Returns a detached (n_subjects, feature_dim) float tensor on `device`.
+    """
+    was_training = model.training
+    model.eval()
+    table = torch.zeros(n_subjects, feature_dim, device=device)
+    for subj, x in baseline_dict.items():
+        sidx = SUBJECT_TO_IDX[subj]
+        x = x.to(device, non_blocking=True)
+        feats = model.extract_features(x)  # (N_b, feat_dim)
+        table[sidx] = feats.mean(dim=0)
+    if was_training:
+        model.train()
+    return table.detach()
+
+
 class _IndexedDataset(torch.utils.data.Dataset):
     """Wraps a Dataset so __getitem__ also returns the dataset index. Lets us
     recover per-sample metadata (e.g. k_idx) after DataLoader shuffling."""
@@ -203,8 +326,8 @@ class _IndexedDataset(torch.utils.data.Dataset):
         return len(self.base)
 
     def __getitem__(self, idx):
-        x, y = self.base[idx]
-        return x, y, idx
+        x, y, sidx = self.base[idx]
+        return x, y, sidx, idx
 
 
 def plot_predicted_vs_actual(y_true, y_pred, title, metrics, artifact_subdir,
@@ -312,10 +435,11 @@ def plot_dmt_evolution(times, y_true, y_pred, title, artifact_subdir,
 
 
 def train_one_epoch(model, loader, criterion, optimizer, device,
-                    mixup_alpha=0.0, ema_model=None, ema_decay=0.999):
+                    mixup_alpha=0.0, ema_model=None, ema_decay=0.999,
+                    mu_s_table=None):
     """Run one training epoch.
 
-    The loader is expected to yield (X, y, dataset_idx) triples (use
+    The loader is expected to yield (X, y, sidx, dataset_idx) tuples (use
     `_IndexedDataset` to wrap a regular Dataset). Returns
     (mean_loss, y_true, y_pred, dataset_indices) so callers can recover each
     sample's metadata (e.g. polyphase k_idx) and compute phase-aware metrics.
@@ -323,19 +447,31 @@ def train_one_epoch(model, loader, criterion, optimizer, device,
     When mixup is active the labels in y_true reflect the *mixed* targets, so
     polyphase grouping by dataset_idx is only strictly meaningful with
     mixup_alpha=0 — the default for every config in this project.
+
+    mu_s_table: optional (n_subjects, feature_dim) tensor on `device`. If
+    given, each batch's per-sample baseline feature is gathered as
+    `mu_s_table[sidx]` and passed to `model.forward(X, mu_s=...)`. Mixup
+    mixes mu_s the same way it mixes inputs and labels so the subtraction
+    stays consistent with the trial pair. None disables subtraction.
     """
     model.train()
     total_loss, n_samples = 0.0, 0
     all_preds, all_labels, all_indices = [], [], []
-    for X, y, idx in loader:
+    for X, y, sidx, idx in loader:
         X, y = X.to(device), y.to(device)
+        if mu_s_table is not None:
+            mu = mu_s_table[sidx.to(device)]  # (B, feat_dim)
+        else:
+            mu = None
         if mixup_alpha and mixup_alpha > 0 and X.size(0) > 1:
             lam = float(np.random.beta(mixup_alpha, mixup_alpha))
             perm = torch.randperm(X.size(0), device=X.device)
             X = lam * X + (1.0 - lam) * X[perm]
             y = lam * y + (1.0 - lam) * y[perm]
+            if mu is not None:
+                mu = lam * mu + (1.0 - lam) * mu[perm]
         optimizer.zero_grad()
-        preds = model(X)
+        preds = model(X, mu_s=mu) if mu is not None else model(X)
         loss = criterion(preds, y)
         loss.backward()
         optimizer.step()
@@ -358,13 +494,20 @@ def train_one_epoch(model, loader, criterion, optimizer, device,
 
 
 @torch.no_grad()
-def evaluate(model, loader, criterion, device):
+def evaluate(model, loader, criterion, device, mu_s_table=None):
+    """Same shape as train_one_epoch but no grad and no mixup. When
+    `mu_s_table` is given, per-batch baseline features are gathered by
+    subject_idx and passed to model.forward."""
     model.eval()
     total_loss, n_samples = 0.0, 0
     all_preds, all_labels = [], []
-    for X, y in loader:
+    for X, y, sidx in loader:
         X, y = X.to(device), y.to(device)
-        preds = model(X)
+        if mu_s_table is not None:
+            mu = mu_s_table[sidx.to(device)]
+            preds = model(X, mu_s=mu)
+        else:
+            preds = model(X)
         loss = criterion(preds, y)
         bs = X.size(0)
         total_loss += loss.item() * bs
@@ -396,10 +539,19 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
 
     data_path = getattr(args, "data_path", None)
     single_phase = getattr(args, "single_phase", False)
+    use_baseline = getattr(args, "baseline_subtraction", False)
     train_ds = EEGDataset(subjects=train_subjects, dataset=args.dataset,
-                          data_path=data_path, single_phase=single_phase)
+                          data_path=data_path, single_phase=single_phase,
+                          load_baseline=use_baseline)
     val_ds = EEGDataset(subjects=[val_subject], dataset=args.dataset,
-                        data_path=data_path, single_phase=single_phase)
+                        data_path=data_path, single_phase=single_phase,
+                        load_baseline=use_baseline)
+    if use_baseline:
+        n_train_b = sum(t.shape[0] for t in train_ds.baseline_eeg.values())
+        n_val_b = sum(t.shape[0] for t in val_ds.baseline_eeg.values())
+        print(f"Baseline buffers: train={n_train_b} trials across "
+              f"{len(train_ds.baseline_eeg)} subjects, "
+              f"val={n_val_b} trials for {val_subject}")
 
     # Sanity: train/val subject sets must be disjoint, and if the dataset
     # carries polyphase metadata every orig_trial_id must live entirely on
@@ -444,21 +596,21 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
                             num_workers=0, pin_memory=True)
 
-    use_se = not args.no_se
-    kernels, strides = _resolve_kernels_strides(args)
-    channels = getattr(args, "channels", None)
-    rf_samples = compute_rf(kernels, strides)
-    model = SimpleCNN(in_channels=train_ds.n_channels, dropout=args.dropout,
-                      kernels=kernels, strides=strides, use_se=use_se,
-                      channels=channels).to(device)
+    model, model_info = _build_model(
+        args, in_channels=train_ds.n_channels,
+        signal_length=train_ds.signal_length, use_baseline=use_baseline,
+    )
+    model = model.to(device)
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"Model parameters: {n_params:,}  |  RF = {rf_samples}ms @ 1kHz  |  "
-          f"n_blocks={len(kernels)}  kernels={kernels}  strides={strides}  "
-          f"channels={channels or 'default'}  SE={use_se}")
+    print(f"Model parameters: {n_params:,}  |  {model_info['model']}  |  "
+          f"info={ {k: v for k, v in model_info.items() if k != 'model'} }  "
+          f"baseline_sub={use_baseline}")
 
-    ema_model = SimpleCNN(in_channels=train_ds.n_channels, dropout=args.dropout,
-                          kernels=kernels, strides=strides, use_se=use_se,
-                          channels=channels).to(device)
+    ema_model, _ = _build_model(
+        args, in_channels=train_ds.n_channels,
+        signal_length=train_ds.signal_length, use_baseline=use_baseline,
+    )
+    ema_model = ema_model.to(device)
     ema_model.load_state_dict(model.state_dict())
     for p in ema_model.parameters():
         p.requires_grad_(False)
@@ -481,14 +633,10 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
         "fold_idx": fold_idx,
         "n_folds": n_folds,
         "dataset": args.dataset,
-        "kernels": str(kernels),
-        "strides": str(strides),
-        "n_blocks": len(kernels),
-        "rf_samples": rf_samples,
-        "rf_ms": rf_samples,
-        "use_se": use_se,
         "early_stop": args.early_stop,
-        "channels": str(channels) if channels is not None else "default",
+        "baseline_subtraction": use_baseline,
+        **{k: str(v) if not isinstance(v, (int, float, bool, str)) else v
+           for k, v in model_info.items()},
     })
 
     best_val_r2 = -float("inf")
@@ -504,19 +652,38 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
           f"on val_{args.early_stop})")
     print("-" * 70, flush=True)
 
+    n_subjects = len(ALL_SUBJECTS)
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
+        # Refresh mu_s tables once per epoch from the current weights. Train
+        # uses the live model (BN/dropout in eval inside compute_mu_s_table);
+        # val uses the EMA model — same separation as the rest of the loop.
+        if use_baseline:
+            train_mu_s = compute_mu_s_table(
+                model, train_ds.baseline_eeg, device,
+                n_subjects, model.feature_dim,
+            )
+            eval_mu_s = compute_mu_s_table(
+                ema_model, val_ds.baseline_eeg, device,
+                n_subjects, ema_model.feature_dim,
+            )
+        else:
+            train_mu_s = None
+            eval_mu_s = None
+
         train_loss, train_yt, train_yp, train_idx = train_one_epoch(
             model, train_loader, criterion, optimizer, device,
             mixup_alpha=args.mixup_alpha,
             ema_model=ema_model, ema_decay=ema_decay,
+            mu_s_table=train_mu_s,
         )
         train_k = (train_ds.k_idx[train_idx]
                    if train_ds.k_idx is not None else None)
         train_metrics = polyphase_metrics(train_yt, train_yp, train_k)
 
         val_loss, _, val_yt, val_yp = evaluate(
-            ema_model, val_loader, criterion, device)
+            ema_model, val_loader, criterion, device,
+            mu_s_table=eval_mu_s)
         val_metrics = polyphase_metrics(val_yt, val_yp, val_ds.k_idx)
         elapsed = time.time() - t0
 
@@ -539,6 +706,8 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
                 "train_mae_pooled": train_metrics["mae_pooled"],
                 "val_mae_pooled":   val_metrics["mae_pooled"],
             })
+        if use_baseline:
+            epoch_metrics["baseline_lambda"] = float(model.baseline_lambda.item())
         mlflow.log_metrics(epoch_metrics, step=epoch)
 
         if mlf_client is not None and parent_run_id is not None:
@@ -582,8 +751,18 @@ def run_fold(args, val_subject, fold_idx, n_folds, device,
         ema_model.load_state_dict(best_state)
         ema_model.to(device)
 
+    # mu_s must be recomputed against the restored ema weights, since the
+    # baseline_lambda value lives inside the restored state and the
+    # extractor's parameters changed.
+    final_eval_mu_s = (
+        compute_mu_s_table(ema_model, val_ds.baseline_eeg, device,
+                           len(ALL_SUBJECTS), ema_model.feature_dim)
+        if use_baseline else None
+    )
+
     final_val_loss, _, y_true, y_pred = evaluate(
-        ema_model, val_loader, criterion, device
+        ema_model, val_loader, criterion, device,
+        mu_s_table=final_eval_mu_s,
     )
     final_val_metrics = polyphase_metrics(y_true, y_pred, val_ds.k_idx)
 
@@ -753,10 +932,8 @@ def main():
     mlf_client = MlflowClient()
     with mlflow.start_run(run_name=run_name) as parent_run:
         parent_run_id = parent_run.info.run_id
-        kernels, strides = _resolve_kernels_strides(args)
-        rf_samples = compute_rf(kernels, strides)
         use_se = not args.no_se
-        mlflow.log_params({
+        parent_params = {
             "lr": args.lr,
             "batch_size": args.batch_size,
             "epochs": args.epochs,
@@ -773,14 +950,29 @@ def main():
             "early_stop_direction": "minimize" if args.early_stop == "loss" else "maximize",
             "dataset": args.dataset,
             "data_path": args.data_path or "",
-            "kernels": str(kernels),
-            "strides": str(strides),
-            "n_blocks": len(kernels),
-            "rf_samples": rf_samples,
-            "rf_ms": rf_samples,
+            "model": getattr(args, "model", "simplecnn"),
             "use_se": use_se,
             "description": args.description,
-        })
+        }
+        if parent_params["model"] == "simplecnn":
+            kernels, strides = _resolve_kernels_strides(args)
+            rf_samples = compute_rf(kernels, strides)
+            parent_params.update({
+                "kernels": str(kernels),
+                "strides": str(strides),
+                "n_blocks": len(kernels),
+                "rf_samples": rf_samples,
+                "rf_ms": rf_samples,
+            })
+        else:
+            parent_params.update({
+                "n_fft": args.n_fft,
+                "hop_length": args.hop_length,
+                "f_max": args.f_max,
+                "spectral_power": args.spectral_power,
+                "spectral_log": not getattr(args, "spectral_no_log", False),
+            })
+        mlflow.log_params(parent_params)
 
         fold_results = []
         for i, subj in enumerate(cv_subjects, start=1):

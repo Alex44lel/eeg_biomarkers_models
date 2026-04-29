@@ -277,6 +277,22 @@ c- runnear mejores exp con stopping based on MAE
 - frequencies above the new Nyquist (100 Hz  at k=5, 50 Hz at k=10) fold back into the kept bands and corrupt the EEG 
 - should we do a low-pass filter before decimating?
 
+- mejor si solo mantenemos 1 phase del polyphase
+- 
+
+NEW EXP TO RUN ON THREE DIFFERENT GPUS:
+- subject alignment with best config k=2
+- two more configs k = 2
+
+- subject alignment current exp
+
+- subject alignment with features model CNN VARIANT
+- subject alignment with fromScratch model cnn variant
+
+
+- set up github lfs (DONE)
+- set up new cluster storage way
+
 
 
 -------------------------------------------------------

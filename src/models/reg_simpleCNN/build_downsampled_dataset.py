@@ -75,8 +75,15 @@ def replicate_per_phase(arr, k):
     return np.repeat(arr, k, axis=0)
 
 
-def build_one(src_eeg, src_labels, src_times, src_subjects, k):
-    """Return the field dict for one K-factor dataset."""
+def build_one(src_eeg, src_labels, src_times, src_subjects, k,
+              src_is_baseline=None):
+    """Return the field dict for one K-factor dataset.
+
+    src_is_baseline (optional): per-trial bool array. When provided, each row
+    is replicated K times (trial-major) so every polyphase view of a baseline
+    trial keeps is_baseline=True. When None, the column is omitted from the
+    output for backward compatibility with legacy non-baseline source files.
+    """
     n_orig, c, l = src_eeg.shape
     if l % k != 0:
         # Dropping at most k-1 trailing samples per phase keeps shapes
@@ -97,7 +104,7 @@ def build_one(src_eeg, src_labels, src_times, src_subjects, k):
     # orig_trial_id: each block of K rows shares the same parent index
     orig_trial_id = np.repeat(np.arange(n_orig, dtype=np.int32), k)
 
-    return {
+    fields = {
         "eeg_data": eeg_ds,
         "labels": labels_ds,
         "times": times_ds,
@@ -106,9 +113,15 @@ def build_one(src_eeg, src_labels, src_times, src_subjects, k):
         "orig_trial_id": orig_trial_id,
         "k_factor": np.int32(k),
     }
+    if src_is_baseline is not None:
+        fields["is_baseline"] = replicate_per_phase(
+            src_is_baseline.astype(bool, copy=False), k
+        )
+    return fields
 
 
-def sanity_check(src_eeg, src_labels, src_times, src_subjects, fields, k):
+def sanity_check(src_eeg, src_labels, src_times, src_subjects, fields, k,
+                 src_is_baseline=None):
     """Hard-fail asserts that the polyphase build is internally consistent
     and that subject grouping is preserved. Intended to run on every
     build so a corrupt file is never silently produced."""
@@ -129,6 +142,15 @@ def sanity_check(src_eeg, src_labels, src_times, src_subjects, fields, k):
     assert subjects.shape == (k * n_orig,)
     assert k_idx.shape == (k * n_orig,)
     assert orig_id.shape == (k * n_orig,)
+    if src_is_baseline is not None:
+        assert "is_baseline" in fields, "is_baseline missing from fields"
+        is_base = fields["is_baseline"]
+        assert is_base.shape == (k * n_orig,), \
+            f"is_baseline shape wrong: {is_base.shape}"
+        assert is_base.dtype == np.bool_
+    else:
+        assert "is_baseline" not in fields, \
+            "is_baseline written without source column"
 
     # 2. k_idx and orig_trial_id layout (trial-major)
     expected_k_idx = np.tile(np.arange(k, dtype=np.int8), n_orig)
@@ -141,10 +163,14 @@ def sanity_check(src_eeg, src_labels, src_times, src_subjects, fields, k):
         block = slice(t * k, (t + 1) * k)
         assert np.all(subjects[block] == src_subjects[t]), \
             f"subject mismatch at trial {t}"
-        assert np.allclose(labels[block], src_labels[t], rtol=1e-5), \
+        # labels can be NaN for baseline rows, so use equal_nan
+        assert np.allclose(labels[block], src_labels[t], rtol=1e-5, equal_nan=True), \
             f"label mismatch at trial {t}"
         assert np.allclose(times[block], src_times[t], rtol=1e-5), \
             f"time mismatch at trial {t}"
+        if src_is_baseline is not None:
+            assert np.all(fields["is_baseline"][block] == src_is_baseline[t]), \
+                f"is_baseline mismatch at trial {t}"
 
     # 4. Polyphase value round-trip on a few random rows
     rng = np.random.default_rng(0)
@@ -199,20 +225,26 @@ def main():
     src_times = src["times"]
     src_subjects = src["subjects"]
     src_channels = src["channel_labels"]
+    src_is_baseline = src["is_baseline"] if "is_baseline" in src.files else None
     n_orig, c, l = src_eeg.shape
-    print(f"  shape: ({n_orig}, {c}, {l})  subjects: {sorted(set(src_subjects.tolist()))}")
+    has_baseline = src_is_baseline is not None
+    print(f"  shape: ({n_orig}, {c}, {l})  subjects: {sorted(set(src_subjects.tolist()))}"
+          f"  is_baseline column: {'yes' if has_baseline else 'no'}")
+    if has_baseline:
+        print(f"  baseline rows: {int(src_is_baseline.sum())} / {n_orig}")
 
     for k in args.k:
         if k < 2:
             print(f"Skipping k={k} (must be >= 2)")
             continue
         print(f"\n=== Building k={k} ===")
-        fields = build_one(src_eeg, src_labels, src_times, src_subjects, k)
-        sanity_check(src_eeg, src_labels, src_times, src_subjects, fields, k)
+        fields = build_one(src_eeg, src_labels, src_times, src_subjects, k,
+                           src_is_baseline=src_is_baseline)
+        sanity_check(src_eeg, src_labels, src_times, src_subjects, fields, k,
+                     src_is_baseline=src_is_baseline)
 
         out_path = out_dir / f"{args.prefix}_k{k}.npz"
-        np.savez(
-            out_path,
+        save_kwargs = dict(
             eeg_data=fields["eeg_data"],
             labels=fields["labels"],
             times=fields["times"],
@@ -222,6 +254,9 @@ def main():
             orig_trial_id=fields["orig_trial_id"],
             k_factor=fields["k_factor"],
         )
+        if has_baseline:
+            save_kwargs["is_baseline"] = fields["is_baseline"]
+        np.savez(out_path, **save_kwargs)
         size_mb = out_path.stat().st_size / 1024 / 1024
         print(f"  Saved {out_path}  ({size_mb:.1f} MB)")
 

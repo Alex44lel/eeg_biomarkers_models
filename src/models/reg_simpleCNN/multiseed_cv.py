@@ -100,6 +100,16 @@ def parse_args():
                    default="SimpleCNN_DMT_regression_CV")
     p.add_argument("--run_name", type=str, default="multiseed_apr19_best")
     p.add_argument("--log_model", action="store_true")
+    p.add_argument("--baseline_subtraction", action="store_true",
+                   help="Linear subject adaptation (see train_cv.py).")
+    p.add_argument("--model", type=str, default="simplecnn",
+                   choices=["simplecnn", "spectral_cnn"],
+                   help="Backbone choice — see train_cv.py / model_spectral.py.")
+    p.add_argument("--n_fft", type=int, default=256)
+    p.add_argument("--hop_length", type=int, default=32)
+    p.add_argument("--f_max", type=float, default=100.0)
+    p.add_argument("--spectral_power", type=float, default=2.0)
+    p.add_argument("--spectral_no_log", action="store_true")
     return p.parse_args()
 
 
@@ -218,16 +228,30 @@ def main():
         "multiseed": "true",
         "n_seeds": len(args.seeds),
         "seeds": ",".join(str(s) for s in args.seeds),
-        "kernels": str(_resolve_kernels_strides(args)[0]),
-        "strides": str(_resolve_kernels_strides(args)[1]),
-        "n_blocks": len(_resolve_kernels_strides(args)[0]),
-        "rf_ms": compute_rf(*_resolve_kernels_strides(args)),
+        "model": args.model,
         "channels": (str(args.channels) if args.channels is not None
                      else "default"),
         "use_se": not args.no_se,
         "early_stop": args.early_stop,
+        "baseline_subtraction": bool(args.baseline_subtraction),
         "description": args.description,
     }
+    if args.model == "simplecnn":
+        kernels, strides = _resolve_kernels_strides(args)
+        shared_hparams.update({
+            "kernels": str(kernels),
+            "strides": str(strides),
+            "n_blocks": len(kernels),
+            "rf_ms": compute_rf(kernels, strides),
+        })
+    else:
+        shared_hparams.update({
+            "n_fft": args.n_fft,
+            "hop_length": args.hop_length,
+            "f_max": args.f_max,
+            "spectral_power": args.spectral_power,
+            "spectral_log": (not args.spectral_no_log),
+        })
 
     with mlflow.start_run(run_name=args.run_name) as parent_run:
         parent_run_id = parent_run.info.run_id

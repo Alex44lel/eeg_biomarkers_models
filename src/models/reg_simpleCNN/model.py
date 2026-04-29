@@ -55,11 +55,22 @@ class SimpleCNN(nn.Module):
 
     Channel progression: 64 / 128 / 256 / 256 / 256 / 256 / 256.
     RF (ms @ 1kHz) = compute_rf(kernels, strides).
+
+    Linear subject adaptation (optional)
+    ------------------------------------
+    use_baseline_subtraction: if True, the regressor sees
+        feat' = feat - baseline_lambda * mu_s
+    where mu_s is a per-sample baseline feature passed via forward(x, mu_s=...)
+    and baseline_lambda is a learnable scalar (initialised to 1.0).
+    The baseline buffer mu_s itself is computed externally (in the training
+    loop) by averaging extract_features() over each subject's pre-injection
+    trials. mu_s must be detached so gradients don't flow through it.
     """
 
     def __init__(self, in_channels=32, dropout=0.3,
                  kernels=(15, 7, 7), strides=None, use_se=True,
-                 channels=None):
+                 channels=None,
+                 use_baseline_subtraction=False):
         n = len(kernels)
         assert 1 <= n <= 7, "kernels must have 1–7 elements"
         super().__init__()
@@ -86,6 +97,14 @@ class SimpleCNN(nn.Module):
         self.pool = nn.Sequential(nn.AdaptiveAvgPool1d(1), nn.Flatten())
         self.regressor = nn.Linear(channels[-1], 1)
 
+        self.feature_dim = channels[-1]
+        self.use_baseline_subtraction = use_baseline_subtraction
+        if use_baseline_subtraction:
+            # Single learnable scalar shared across subjects/features. Init at
+            # 1.0 = literal paper subtraction; the model can learn to shrink
+            # toward 0 if subtraction hurts.
+            self.baseline_lambda = nn.Parameter(torch.ones(1))
+
     def extract_features(self, x):
         for i in range(1, self.n_blocks + 1):
             x = getattr(self, f"drop{i}")(
@@ -95,5 +114,8 @@ class SimpleCNN(nn.Module):
             )
         return self.pool(x)
 
-    def forward(self, x):
-        return self.regressor(self.extract_features(x)).squeeze(-1)
+    def forward(self, x, mu_s=None):
+        feat = self.extract_features(x)
+        if self.use_baseline_subtraction and mu_s is not None:
+            feat = feat - self.baseline_lambda * mu_s
+        return self.regressor(feat).squeeze(-1)

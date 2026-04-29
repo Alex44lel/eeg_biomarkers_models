@@ -63,5 +63,5 @@ class EEGDoseDataset(Dataset):
         return len(self.base)
 
     def __getitem__(self, idx):
-        eeg, label = self.base[idx]
+        eeg, label, _sidx = self.base[idx]
         return eeg, label, self.doses[idx]
