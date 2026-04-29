@@ -1,0 +1,7 @@
+artifact_location: file:///home/alex/Desktop/tfm_code/mlruns_cluster/765808768288744310
+creation_time: 1777120513333
+experiment_id: '765808768288744310'
+last_update_time: 1777120513333
+lifecycle_stage: active
+name: SimpleCNN_DMT_regression_CV_seed
+workspace: default

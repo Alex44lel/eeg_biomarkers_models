@@ -1,0 +1,14 @@
+artifact_uri: file:///home/alex/Desktop/tfm_code/mlruns_cluster/765808768288744310/cab6f6b41de44e4c8d14bd6ffed1ba7e/artifacts
+end_time: 1777238755802
+entry_point_name: ''
+experiment_id: '765808768288744310'
+lifecycle_stage: active
+run_id: cab6f6b41de44e4c8d14bd6ffed1ba7e
+run_name: apr26_multiseed_k10_wide
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1777222380701
+status: 3
+tags: []
+user_id: ac5725

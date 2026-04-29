@@ -1,0 +1,1 @@
+Capacity sweep: k=2 polyphase (L=1500) at WIDE channels=96 192 384. RF=311 sub-samples = 622 raw-ms (Δ-0.2% vs k=1). Tests whether the apr25 k=2 win (+0.345) survives at this capacity, and whether the polyphase aug benefit scales with model size.

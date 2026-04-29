@@ -1,0 +1,1 @@
+Capacity sweep: k=10 polyphase (L=300) at NARROW channels=32 64 128. RF=63 sub-samples = 630 raw-ms (Δ+1.1% vs k=1). Tests whether k=10's apr25 collapse (-0.04) was even partially recoverable with capacity; if it stays near zero, 100 Hz effective rate is below the signal floor regardless of model size.

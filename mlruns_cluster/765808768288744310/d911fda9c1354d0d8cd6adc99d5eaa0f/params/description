@@ -1,0 +1,1 @@
+Capacity sweep: k=1 (no polyphase, L=3000) at WIDE channels=96 192 384. RF=623ms (kernels=63/15/15). Tests whether the apr19 / apr24_exp1 baseline is over- or under-parameterised compared to the 788k default.

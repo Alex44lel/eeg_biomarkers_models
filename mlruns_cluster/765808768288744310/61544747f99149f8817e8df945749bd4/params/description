@@ -1,0 +1,1 @@
+Polyphase k=5 (L=600). RF-matched to k=1 baseline (kernels=63/15/15, RF=623ms): kernels=(13,3,4) → RF=125 sub-samples = 625 raw-ms (Δ+0.3%). 5× polyphase augmentation (each trial → 5 interleaved sub-signals at 200 Hz effective rate). Param count ≈ 227k — much smaller than baseline; if R² holds up, the model is wildly over-parameterised at k=1.

@@ -1,0 +1,1 @@
+Polyphase k=10 (L=300). RF-matched to k=1 baseline (kernels=63/15/15, RF=623ms): kernels=(15,3,2) → RF=63 sub-samples = 630 raw-ms (Δ+1.1%). 10× polyphase augmentation (each trial → 10 interleaved sub-signals at 100 Hz effective rate). Param count ≈ 166k. Most aggressive downsampling: tests whether DMT signal survives loss of fine temporal detail when model sees 10× more samples.

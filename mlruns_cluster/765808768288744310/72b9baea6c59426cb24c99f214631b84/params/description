@@ -1,0 +1,1 @@
+Capacity sweep: k=4 polyphase (L=750, pk_k4, Nyquist=125Hz) at WIDE channels (96 192 384). RF=157 sub-samples × 4ms = 628 raw-ms (kernels=13/3/5, strides=8/4/4). Fills missing k=4 column of apr26 grid. k=4 Nyquist=125Hz cuts high-gamma; expected between k=2 (+0.345) and k=5 (+0.132), likely closer to k=5 if gamma content is important for predicting plasma DMT.

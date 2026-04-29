@@ -1,0 +1,14 @@
+artifact_uri: file:///home/alex/Desktop/tfm_code/mlruns_cluster/765808768288744310/f7c81d39ecac4c6187862fb2ab99d65a/artifacts
+end_time: 1777122591700
+entry_point_name: ''
+experiment_id: '765808768288744310'
+lifecycle_stage: active
+run_id: f7c81d39ecac4c6187862fb2ab99d65a
+run_name: fold_03_val_S05
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1777122384083
+status: 3
+tags: []
+user_id: ac5725

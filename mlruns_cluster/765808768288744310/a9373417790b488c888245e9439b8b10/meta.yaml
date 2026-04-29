@@ -1,0 +1,14 @@
+artifact_uri: file:///home/alex/Desktop/tfm_code/mlruns_cluster/765808768288744310/a9373417790b488c888245e9439b8b10/artifacts
+end_time: 1777434260212
+entry_point_name: ''
+experiment_id: '765808768288744310'
+lifecycle_stage: active
+run_id: a9373417790b488c888245e9439b8b10
+run_name: apr28_multiseed_k5_default_singlephase
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1777430728221
+status: 3
+tags: []
+user_id: ac5725

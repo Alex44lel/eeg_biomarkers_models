@@ -1,0 +1,1 @@
+SINGLE-PHASE k=4 polyphase (pk_k4, k_idx==0 only, L=750, Nyquist=125Hz) at WIDE channels (96 192 384). Same parent-window count as the k=1 baseline; each window decimated by 4. RF=157 sub-samples × 4ms = 628 raw-ms (kernels=13/3/5, strides=8/4/4). Compares directly to apr28_multiseed_k4_wide (multi-phase, same kernels/channels).

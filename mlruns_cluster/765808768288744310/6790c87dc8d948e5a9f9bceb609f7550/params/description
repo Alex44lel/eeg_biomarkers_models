@@ -1,0 +1,1 @@
+Polyphase k=2 (L=1500). RF-matched to k=1 baseline (kernels=63/15/15, RF=623ms): kernels=(31,8,8) → RF=311 sub-samples = 622 raw-ms (Δ-0.2%). Tests whether the 2× polyphase augmentation (each trial → 2 interleaved sub-signals at 500 Hz effective rate) improves generalisation under a fair RF comparison. Param count ≈ 436k vs 788k baseline — capacity is a confound.
