@@ -1,0 +1,88 @@
+Wed Apr 29 17:59:05 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.126.09             Driver Version: 580.126.09     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA A30                     Off |   00000000:04:00.0 Off |                    0 |
+| N/A   31C    P0             29W /  165W |       0MiB /  24576MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+============================================================
+  apr29 BANDPOWER MVP — 6 multiseed runs
+  All on pk_k2_with_baseline + --single_phase + --model bandpower_linear
+  Welch features: 6 bands × 32 ch = 192, nperseg=512, log + train z-score
+============================================================
+======================================================================
+  SimpleCNN DMT Plasma Regression  |  MULTI-SEED LOSO CV
+======================================================================
+Device:        cuda
+Dataset:       pk_k2_with_baseline
+Subjects (8): ['S01', 'S02', 'S05', 'S06', 'S07', 'S10', 'S12', 'S13']
+Seeds (5): [42, 123, 7, 2024, 0]
+Hyperparams:   lr=0.0005  bs=64  dropout=0.3  wd=0.001
+               loss=smoothl1  huber_beta=10.0  mixup_alpha=0.0
+Training:      max_epochs=300  patience=40
+======================================================================
+/vol/bitbucket/ac5725/eeg_biomarkers_models/env/lib/python3.12/site-packages/mlflow/tracking/_tracking_service/utils.py:184: FutureWarning: The filesystem tracking backend (e.g., './mlruns') is deprecated as of February 2026. Consider transitioning to a database backend (e.g., 'sqlite:///mlflow.db') to take advantage of the latest MLflow features. See https://mlflow.org/docs/latest/self-hosting/migrate-from-file-store for migration guidance.
+  return FileStore(store_uri, store_uri)
+
+######################################################################
+#  SEED 1/5  (seed = 42)
+######################################################################
+
+======================================================================
+  FOLD 1/8  |  val_subject = S01
+======================================================================
+Traceback (most recent call last):
+  File "/vol/bitbucket/ac5725/eeg_biomarkers_models/env/lib/python3.12/site-packages/mlflow/store/tracking/file_store.py", line 1251, in log_batch
+    self._log_run_param(run_info, param)
+  File "/vol/bitbucket/ac5725/eeg_biomarkers_models/env/lib/python3.12/site-packages/mlflow/store/tracking/file_store.py", line 1130, in _log_run_param
+    self._validate_new_param_value(
+  File "/vol/bitbucket/ac5725/eeg_biomarkers_models/env/lib/python3.12/site-packages/mlflow/store/tracking/file_store.py", line 1150, in _validate_new_param_value
+    raise MlflowException(
+mlflow.exceptions.MlflowException: Changing param values is not allowed. Param with key='channels' was already logged with value='default' for run ID='6775aa86fed84cad9717faa7f394c772'. Attempted logging new value 'n/a (bandpower)'.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/vol/bitbucket/ac5725/eeg_biomarkers_models/src/models/reg_simpleCNN/multiseed_cv.py", line 516, in <module>
+    main()
+  File "/vol/bitbucket/ac5725/eeg_biomarkers_models/src/models/reg_simpleCNN/multiseed_cv.py", line 307, in main
+    res = run_fold(
+          ^^^^^^^^^
+  File "/vol/bitbucket/ac5725/eeg_biomarkers_models/src/models/reg_simpleCNN/train_cv.py", line 713, in run_fold
+    mlflow.log_params({
+  File "/vol/bitbucket/ac5725/eeg_biomarkers_models/env/lib/python3.12/site-packages/mlflow/tracking/fluent.py", line 1296, in log_params
+    return MlflowClient().log_batch(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/vol/bitbucket/ac5725/eeg_biomarkers_models/env/lib/python3.12/site-packages/mlflow/tracking/client.py", line 2697, in log_batch
+    return self._tracking_client.log_batch(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/vol/bitbucket/ac5725/eeg_biomarkers_models/env/lib/python3.12/site-packages/mlflow/telemetry/track.py", line 30, in wrapper
+    result = func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "/vol/bitbucket/ac5725/eeg_biomarkers_models/env/lib/python3.12/site-packages/mlflow/tracking/_tracking_service/client.py", line 569, in log_batch
+    self.store.log_batch(
+  File "/vol/bitbucket/ac5725/eeg_biomarkers_models/env/lib/python3.12/site-packages/mlflow/store/tracking/file_store.py", line 1269, in log_batch
+    raise MlflowException(e, INTERNAL_ERROR)
+mlflow.exceptions.MlflowException: Changing param values is not allowed. Param with key='channels' was already logged with value='default' for run ID='6775aa86fed84cad9717faa7f394c772'. Attempted logging new value 'n/a (bandpower)'.
+Train subjects (7): ['S02', 'S05', 'S06', 'S07', 'S10', 'S12', 'S13']
+Val subject:                 S01
+Bandpower features: F=192  (32ch × 6 bands)  fs=500.0 Hz  nperseg=512  log=True  z-score=on
+Train samples:  1690 | Val samples:   250 | L=192 | k_factor=1
+Label range (train): [15.37, 555.37] ng/mL  (mean=195.46)
+Label range (val):   [14.48, 93.22] ng/mL  (mean=32.64)
+Model parameters: 193  |  bandpower_linear  |  info={'n_features': 192, 'bandpower_bands': 'default(6)', 'bandpower_log': True, 'bandpower_zscore': True, 'bandpower_welch_nperseg': 512, 'bandpower_hidden': 'linear', 'kernels': 'n/a (bandpower)', 'strides': 'n/a (bandpower)', 'n_blocks': 1, 'rf_samples': 192, 'rf_ms': 192, 'channels': 'n/a (bandpower)', 'use_se': False}  baseline_sub=False
